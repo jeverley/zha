@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import functools
 import logging
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -16,6 +17,8 @@ from zha.application.platforms.cover.const import (
     ATTR_CURRENT_POSITION,
     ATTR_POSITION,
     ATTR_TILT_POSITION,
+    POSITION_CLOSED,
+    POSITION_OPEN,
     STATE_CLOSED,
     STATE_CLOSING,
     STATE_OPEN,
@@ -49,6 +52,16 @@ _LOGGER = logging.getLogger(__name__)
 
 MULTI_MATCH = functools.partial(PLATFORM_ENTITIES.multipass_match, Platform.COVER)
 
+# Some devices do not stop on the exact target percentage
+POSITION_TOLERANCE: int = 1
+
+# Timeout for device movement following a position attribute update
+DEFAULT_MOVEMENT_TIMEOUT: float = 5
+
+# Upper limit for dynamic timeout
+LIFT_MOVEMENT_TIMEOUT_RANGE: float = 300
+TILT_MOVEMENT_TIMEOUT_RANGE: float = 30
+
 
 @MULTI_MATCH(cluster_handler_names=CLUSTER_HANDLER_COVER)
 class Cover(PlatformEntity):
@@ -57,10 +70,6 @@ class Cover(PlatformEntity):
     PLATFORM = Platform.COVER
 
     _attr_translation_key: str = "cover"
-    _attr_extra_state_attribute_names: set[str] = {
-        "target_lift_position",
-        "target_tilt_position",
-    }
 
     def __init__(
         self,
@@ -74,6 +83,7 @@ class Cover(PlatformEntity):
         super().__init__(unique_id, cluster_handlers, endpoint, device, **kwargs)
         cluster_handler = self.cluster_handlers.get(CLUSTER_HANDLER_COVER)
         assert cluster_handler
+
         self._cover_cluster_handler: WindowCoveringClusterHandler = cast(
             WindowCoveringClusterHandler, cluster_handler
         )
@@ -86,14 +96,40 @@ class Cover(PlatformEntity):
         self._attr_supported_features: CoverEntityFeature = (
             self._determine_supported_features()
         )
+
         self._target_lift_position: int | None = None
         self._target_tilt_position: int | None = None
+        self._lift_update_reported: bool | None = None
+        self._tilt_update_reported: bool | None = None
+
+        self._lift_position_history: deque[int | None] = deque(
+            (self.current_cover_position,), maxlen=2
+        )
+        self._tilt_position_history: deque[int | None] = deque(
+            (self.current_cover_tilt_position,), maxlen=2
+        )
+        self._loop = asyncio.get_running_loop()
+        self._movement_timer: asyncio.TimerHandle | None = None
+
         self._state: str = STATE_OPEN
-        self._determine_initial_state()
+        self._determine_state()
         self._cover_cluster_handler.on_event(
             CLUSTER_HANDLER_ATTRIBUTE_UPDATED,
             self.handle_cluster_handler_attribute_updated,
         )
+
+    def restore_external_state_attributes(
+        self,
+        *,
+        state: Literal[
+            "open", "opening", "closed", "closing"
+        ],  # FIXME: why must these be expanded?
+        target_lift_position: int | None = None,
+        target_tilt_position: int | None = None,
+    ):
+        """Restore external state attributes."""
+        self._state = state
+        # Target positions have been removed
 
     @property
     def supported_features(self) -> CoverEntityFeature:
@@ -111,38 +147,16 @@ class Cover(PlatformEntity):
                 "is_opening": self.is_opening,
                 "is_closing": self.is_closing,
                 "is_closed": self.is_closed,
-                "target_lift_position": self._target_lift_position,
-                "target_tilt_position": self._target_tilt_position,
             }
         )
         return response
 
-    def restore_external_state_attributes(
-        self,
-        *,
-        state: Literal[
-            "open", "opening", "closed", "closing"
-        ],  # FIXME: why must these be expanded?
-        target_lift_position: int | None,
-        target_tilt_position: int | None,
-    ):
-        """Restore external state attributes."""
-        self._state = state
-        self._target_lift_position = target_lift_position
-        self._target_tilt_position = target_tilt_position
-
     @property
     def is_closed(self) -> bool | None:
-        """Return True if the cover is closed.
-
-        In HA None is unknown, 0 is closed, 100 is fully open.
-        In ZCL 0 is fully open, 100 is fully closed.
-        Keep in mind the values have already been flipped to match HA
-        in the WindowCovering cluster handler
-        """
+        """Return True if the cover is closed."""
         if self.current_cover_position is None:
             return None
-        return self.current_cover_position == 0
+        return self.current_cover_position == POSITION_CLOSED
 
     @property
     def is_opening(self) -> bool:
@@ -193,81 +207,196 @@ class Cover(PlatformEntity):
             supported_features |= CoverEntityFeature.STOP_TILT
         return supported_features
 
-    def _determine_initial_state(self) -> None:
-        """Determine the initial state of the cover."""
+    @staticmethod
+    def _determine_axis_state(
+        current: int | None,
+        target: int | None,
+        history: deque[int | None],
+        is_update: bool = False,
+    ):
+        """Determine cover axis state (lift/tilt).
+
+        Some device update position during movement, others only after stopping.
+        When a target is defined the logic aims to mitigate split-brain scenarios
+        where a HA command is interrupted by a device button press/physical obstruction.
+
+        The logic considers previous position to determine if the cover is moving,
+        if the position has not changed between two device updates it is not moving.
+        """
+
+        if current is None:
+            return None
+        previous = history[0] if history[0] is not None else current
+
+        if target is None and is_update and previous != current:
+            target = POSITION_OPEN if current > previous else POSITION_CLOSED
+
         if (
-            self._cover_cluster_handler.window_covering_type
-            and self._cover_cluster_handler.window_covering_type
-            in (
-                WCT.Shutter,
-                WCT.Tilt_blind_tilt_only,
-                WCT.Tilt_blind_tilt_and_lift,
+            target is not None
+            and current != target
+            and (not is_update or previous != current or history[0] is None)
+            and (
+                previous <= current < target - POSITION_TOLERANCE
+                or target + POSITION_TOLERANCE < current <= previous
             )
         ):
-            self._determine_state(
-                self.current_cover_tilt_position, is_lift_update=False
-            )
-            if (
-                self._cover_cluster_handler.window_covering_type
-                == WCT.Tilt_blind_tilt_and_lift
-            ):
-                state = self._state
-                self._determine_state(self.current_cover_position)
-                if state == STATE_OPEN and self._state == STATE_CLOSED:
-                    # let the tilt state override the lift state
-                    self._state = STATE_OPEN
-        else:
-            self._determine_state(self.current_cover_position)
+            # ZHA thinks the cover is moving
+            return STATE_OPENING if target > current else STATE_CLOSING
 
-    def _determine_state(self, position_or_tilt, is_lift_update=True) -> None:
-        """Determine the state of the cover.
+        # Return the static position
+        return STATE_OPEN if current > POSITION_CLOSED else STATE_CLOSED
+
+    def _determine_state(
+        self, is_lift_update: bool | None = False, is_tilt_update: bool | None = False
+    ) -> None:
+        """Determine the state of the cover entity."""
+
+        # Determine state for lift and tilt axis
+        lift_state = self._determine_axis_state(
+            self.current_cover_position,
+            self._target_lift_position,
+            self._lift_position_history,
+            is_lift_update,
+        )
+        tilt_state = self._determine_axis_state(
+            self.current_cover_tilt_position,
+            self._target_tilt_position,
+            self._tilt_position_history,
+            is_tilt_update,
+        )
+
+        _LOGGER.debug(
+            "_determine_state: lift=(state: %s, attr_update: %s, current: %s, target: %s, history: %s), tilt=(state: %s, attr_update: %s, current: %s, target: %s, history: %s)",
+            lift_state,
+            is_lift_update,
+            self.current_cover_position,
+            self._target_lift_position,
+            self._lift_position_history,
+            tilt_state,
+            is_tilt_update,
+            self.current_cover_tilt_position,
+            self._target_tilt_position,
+            self._tilt_position_history,
+        )
+
+        # Clear target position if the cover axis is not moving
+        if lift_state not in (STATE_OPENING, STATE_CLOSING):
+            self._target_lift_position = None
+        if tilt_state not in (STATE_OPENING, STATE_CLOSING):
+            self._target_tilt_position = None
+
+        # Start a movement timeout if the cover is moving, else cancel it
+        if STATE_CLOSING in (lift_state, tilt_state) or STATE_OPENING in (
+            lift_state,
+            tilt_state,
+        ):
+            self._start_movement_timer()
+        else:
+            self._cancel_movement_timer()
+
+        # Keep the last movement direction if either axis is still moving
+        if (
+            self.is_closing
+            and STATE_CLOSING in (lift_state, tilt_state)
+            or self.is_opening
+            and STATE_OPENING in (lift_state, tilt_state)
+        ):
+            return
+
+        # An open tilt state overrides a closed lift state
+        if tilt_state == STATE_OPEN and lift_state == STATE_CLOSED:
+            self._state = STATE_OPEN
+            return
+
+        # Pick lift state in preference over tilt
+        self._state = lift_state or tilt_state
+
+    def _dynamic_timer_value(self) -> float:
+        """Return a timer duration in seconds based on expected movement distance.
+
+        This is required because some devices only report position updates after stopping.
+        """
+
+        lift_timeout = 0.0
+        tilt_timeout = 0.0
+
+        # Dynamic lift timeout if a local target is defined and the device has not reported a new position
+        if (
+            self._target_lift_position is not None
+            and self.current_cover_position is not None
+            and not self._lift_update_reported
+        ):
+            lift_timeout = (
+                abs(self._target_lift_position - self.current_cover_position)
+                * 0.01
+                * LIFT_MOVEMENT_TIMEOUT_RANGE
+            )
+
+        # Dynamic tilt timeout if a local target is defined and the device has not reported a new position
+        if (
+            self._target_tilt_position is not None
+            and self.current_cover_tilt_position is not None
+            and not self._tilt_update_reported
+        ):
+            tilt_timeout = (
+                abs(self._target_tilt_position - self.current_cover_tilt_position)
+                * 0.01
+                * TILT_MOVEMENT_TIMEOUT_RANGE
+            )
+
+        # Return the max axis timeout or default timeout if the max is 0
+        return max(lift_timeout, tilt_timeout) or DEFAULT_MOVEMENT_TIMEOUT
+
+    def _start_movement_timer(self, seconds: float = 0) -> None:
+        """Start timer for clearing the current movement state."""
+        if self._movement_timer:
+            self._movement_timer.cancel()
+        duration = seconds or self._dynamic_timer_value()
+        if duration <= 0:
+            raise ZHAException(f"Invalid movement timer duration: {duration}")
+        self._movement_timer = self._loop.call_later(
+            duration, self._clear_movement_state, duration
+        )
+
+    def _cancel_movement_timer(self) -> None:
+        """Cancel the current movement timer."""
+        if self._movement_timer:
+            self._movement_timer.cancel()
+            self._movement_timer = None
+
+    def _clear_movement_state(self, duration: float, _=None) -> None:
+        """Clear the moving state of the cover due to inactivity."""
+        _LOGGER.debug("No movement reported for %s seconds", duration)
+        self._target_lift_position = None
+        self._target_tilt_position = None
+        self._determine_state()
+        self.maybe_emit_state_changed_event()
+
+    @staticmethod
+    def _invert_position_for_zcl(position: int) -> int:
+        """Convert the HA position to the ZCL position range.
 
         In HA None is unknown, 0 is closed, 100 is fully open.
         In ZCL 0 is fully open, 100 is fully closed.
-        Keep in mind the values have already been flipped to match HA
-        in the WindowCovering cluster handler
         """
-        if is_lift_update:
-            target = self._target_lift_position
-            current = self.current_cover_position
-        else:
-            target = self._target_tilt_position
-            current = self.current_cover_tilt_position
-
-        if position_or_tilt == 0:
-            self._state = (
-                STATE_CLOSED
-                if is_lift_update
-                else STATE_OPEN
-                if self.current_cover_position is not None
-                and self.current_cover_position > 0
-                else STATE_CLOSED
-            )
-            return
-        if target is not None and target != current:
-            # we are mid transition and shouldn't update the state
-            return
-        self._state = STATE_OPEN
+        return 100 - position
 
     def handle_cluster_handler_attribute_updated(
         self, event: ClusterAttributeUpdatedEvent
     ) -> None:
-        """Handle position update from cluster handler."""
-        if event.attribute_id in (
-            WCAttrs.current_position_lift_percentage.id,
-            WCAttrs.current_position_tilt_percentage.id,
-        ):
-            value = (
-                self.current_cover_position
-                if event.attribute_id == WCAttrs.current_position_lift_percentage.id
-                else self.current_cover_tilt_position
-            )
-            self._determine_state(
-                value,
-                is_lift_update=(
-                    event.attribute_id == WCAttrs.current_position_lift_percentage.id
-                ),
-            )
+        """Handle position updates from cluster handler.
+
+        The previous position is retained for use in state determination.
+        """
+        _LOGGER.debug("handle_cluster_handler_attribute_updated=%s", event)
+        if event.attribute_id == WCAttrs.current_position_lift_percentage.id:
+            self._lift_position_history.append(self.current_cover_position)
+            self._lift_update_reported = True
+            self._determine_state(is_lift_update=True)
+        if event.attribute_id == WCAttrs.current_position_tilt_percentage.id:
+            self._tilt_position_history.append(self.current_cover_tilt_position)
+            self._tilt_update_reported = True
+            self._determine_state(is_tilt_update=True)
         self.maybe_emit_state_changed_event()
 
     def async_update_state(self, state):
@@ -275,34 +404,48 @@ class Cover(PlatformEntity):
         _LOGGER.debug("async_update_state=%s", state)
         self._state = state
         self.maybe_emit_state_changed_event()
+        if state in (STATE_OPENING, STATE_CLOSING):
+            self._start_movement_timer()
 
     async def async_open_cover(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
         """Open the cover."""
+        self._target_lift_position = POSITION_OPEN
         res = await self._cover_cluster_handler.up_open()
         if res[1] is not Status.SUCCESS:
+            self._target_lift_position = None
             raise ZHAException(f"Failed to open cover: {res[1]}")
         self.async_update_state(STATE_OPENING)
 
     async def async_open_cover_tilt(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
         """Open the cover tilt."""
-        # 0 is open in ZCL
-        res = await self._cover_cluster_handler.go_to_tilt_percentage(0)
+        self._target_tilt_position = POSITION_OPEN
+        res = await self._cover_cluster_handler.go_to_tilt_percentage(
+            self._invert_position_for_zcl(POSITION_OPEN)
+        )
         if res[1] is not Status.SUCCESS:
+            self._target_tilt_position = None
             raise ZHAException(f"Failed to open cover tilt: {res[1]}")
         self.async_update_state(STATE_OPENING)
 
     async def async_close_cover(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
         """Close the cover."""
+        self._target_lift_position = POSITION_CLOSED
+        self._lift_update_reported = False
         res = await self._cover_cluster_handler.down_close()
         if res[1] is not Status.SUCCESS:
+            self._target_lift_position = None
             raise ZHAException(f"Failed to close cover: {res[1]}")
         self.async_update_state(STATE_CLOSING)
 
     async def async_close_cover_tilt(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
         """Close the cover tilt."""
-        # 100 is closed in ZCL
-        res = await self._cover_cluster_handler.go_to_tilt_percentage(100)
+        self._target_tilt_position = POSITION_CLOSED
+        self._tilt_update_reported = False
+        res = await self._cover_cluster_handler.go_to_tilt_percentage(
+            self._invert_position_for_zcl(POSITION_CLOSED)
+        )
         if res[1] is not Status.SUCCESS:
+            self._target_tilt_position = None
             raise ZHAException(f"Failed to close cover tilt: {res[1]}")
         self.async_update_state(STATE_CLOSING)
 
@@ -311,11 +454,12 @@ class Cover(PlatformEntity):
         self._target_lift_position = kwargs[ATTR_POSITION]
         assert self._target_lift_position is not None
         assert self.current_cover_position is not None
-        # the 100 - value is because we need to invert the value before giving it to ZCL
+        self._lift_update_reported = False
         res = await self._cover_cluster_handler.go_to_lift_percentage(
-            100 - self._target_lift_position
+            self._invert_position_for_zcl(self._target_lift_position)
         )
         if res[1] is not Status.SUCCESS:
+            self._target_lift_position = None
             raise ZHAException(f"Failed to set cover position: {res[1]}")
         self.async_update_state(
             STATE_CLOSING
@@ -328,11 +472,12 @@ class Cover(PlatformEntity):
         self._target_tilt_position = kwargs[ATTR_TILT_POSITION]
         assert self._target_tilt_position is not None
         assert self.current_cover_tilt_position is not None
-        # the 100 - value is because we need to invert the value before giving it to ZCL
+        self._tilt_update_reported = False
         res = await self._cover_cluster_handler.go_to_tilt_percentage(
-            100 - self._target_tilt_position
+            self._invert_position_for_zcl(self._target_tilt_position)
         )
         if res[1] is not Status.SUCCESS:
+            self._target_tilt_position = None
             raise ZHAException(f"Failed to set cover tilt position: {res[1]}")
         self.async_update_state(
             STATE_CLOSING
@@ -342,20 +487,22 @@ class Cover(PlatformEntity):
 
     async def async_stop_cover(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
         """Stop the cover."""
+        self._target_lift_position = None
+        self._lift_update_reported = False
         res = await self._cover_cluster_handler.stop()
         if res[1] is not Status.SUCCESS:
             raise ZHAException(f"Failed to stop cover: {res[1]}")
-        self._target_lift_position = self.current_cover_position
-        self._determine_state(self.current_cover_position)
+        self._determine_state()
         self.maybe_emit_state_changed_event()
 
     async def async_stop_cover_tilt(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
         """Stop the cover tilt."""
+        self._target_tilt_position = None
+        self._tilt_update_reported = False
         res = await self._cover_cluster_handler.stop()
         if res[1] is not Status.SUCCESS:
             raise ZHAException(f"Failed to stop cover: {res[1]}")
-        self._target_tilt_position = self.current_cover_tilt_position
-        self._determine_state(self.current_cover_tilt_position, is_lift_update=False)
+        self._determine_state()
         self.maybe_emit_state_changed_event()
 
 
@@ -382,7 +529,7 @@ class Shade(PlatformEntity):
         device: Device,
         **kwargs,
     ) -> None:
-        """Initialize the ZHA light."""
+        """Initialize the ZHA shade."""
         super().__init__(unique_id, cluster_handlers, endpoint, device, **kwargs)
         self._on_off_cluster_handler: ClusterHandler = self.cluster_handlers[
             CLUSTER_HANDLER_ON_OFF
