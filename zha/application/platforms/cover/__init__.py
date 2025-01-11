@@ -88,8 +88,10 @@ class Cover(PlatformEntity):
         )
         self._target_lift_position: int | None = None
         self._target_tilt_position: int | None = None
-        self._previous_lift_position: int | None = None
-        self._previous_tilt_position: int | None = None
+        self._cached_cover_position: int | None = None
+        self._cached_cover_tilt_position: int | None = None
+        self._previous_cover_position: int | None = None
+        self._previous_cover_tilt_position: int | None = None
         self._state: str = STATE_OPEN
         self._determine_state()
         self._cover_cluster_handler.on_event(
@@ -213,8 +215,9 @@ class Cover(PlatformEntity):
         between devices in reporting the current position attribute i.e.
         updates during/only after movements
 
-        This aims to mitigate split-brain scenarios where a HA command is
-        interrupted by a device button press/physical obstruction.
+        The logic aims to mitigate split-brain scenarios where a HA command
+        is interrupted by a device button press/physical obstruction.
+        This is achieved by comparing the new position to the last reported.
         """
         if current is None:
             return None
@@ -233,17 +236,17 @@ class Cover(PlatformEntity):
         lift_state = self._determine_state_from_positions(
             self.current_cover_position,
             self._target_lift_position,
-            self._previous_lift_position,
+            self._previous_cover_position,
             is_lift_update,
         )
         tilt_state = self._determine_state_from_positions(
             self.current_cover_tilt_position,
             self._target_tilt_position,
-            self._previous_tilt_position,
+            self._previous_cover_tilt_position,
             is_tilt_update,
         )
         if lift_state == STATE_CLOSED and tilt_state == STATE_OPEN:
-            # let the open tilt state override a closed lift state
+            # an open tilt state overrides a closed lift state
             self._state = STATE_OPEN
             return
         self._state = lift_state or tilt_state
@@ -253,8 +256,12 @@ class Cover(PlatformEntity):
     ) -> None:
         """Handle position update from cluster handler."""
         if event.attribute_id == WCAttrs.current_position_lift_percentage.id:
+            self._previous_cover_position = self._cached_cover_position
+            self._cached_cover_position = self.current_cover_position
             self._determine_state(is_lift_update=True)
         if event.attribute_id == WCAttrs.current_position_tilt_percentage.id:
+            self._previous_cover_tilt_position = self._cached_cover_tilt_position
+            self._cached_cover_tilt_position = self.current_cover_tilt_position
             self._determine_state(is_tilt_update=True)
         self.maybe_emit_state_changed_event()
 
