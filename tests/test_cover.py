@@ -361,6 +361,49 @@ async def test_cover(
 
         assert entity.state["state"] == STATE_OPEN
 
+    # test interrupted movement (e.g. device button press), starting from 47 %
+    with patch("zigpy.zcl.Cluster.request", return_value=[0x5, zcl_f.Status.SUCCESS]):
+        await entity.async_set_cover_position(position=0)  # 100 when inverted for ZCL
+        await zha_gateway.async_block_till_done()
+        assert cluster.request.call_count == 1
+        assert cluster.request.call_args[0][0] is False
+        assert cluster.request.call_args[0][1] == 0x05
+        assert cluster.request.call_args[0][2].command.name == "go_to_lift_percentage"
+        assert cluster.request.call_args[0][3] == 100
+        assert cluster.request.call_args[1]["expect_reply"] is True
+
+        assert entity.state["current_position"] == 47
+        assert entity.state["state"] == STATE_CLOSING
+
+        # simulate a device position update to set timer to the default duration rather than dynamic
+        await send_attributes_report(
+            zha_gateway, cluster, {WCAttrs.current_position_lift_percentage.id: 70}
+        )
+
+        assert entity.state["current_position"] == 30
+        assert entity.state["state"] == STATE_CLOSING
+
+        # wait the timer duration
+        await asyncio.sleep(5)
+
+        assert entity.state["current_position"] == 30
+        assert entity.state["state"] == STATE_OPEN
+
+    # test device instigated movement (e.g. device button press), starting from 30 %
+    with patch("zigpy.zcl.Cluster.request", return_value=[0x5, zcl_f.Status.SUCCESS]):
+        await send_attributes_report(
+            zha_gateway, cluster, {WCAttrs.current_position_lift_percentage.id: 60}
+        )
+
+        assert entity.state["current_position"] == 40
+        assert entity.state["state"] == STATE_OPENING
+
+        # wait the default timer duration
+        await asyncio.sleep(5)
+
+        assert entity.state["current_position"] == 40
+        assert entity.state["state"] == STATE_OPEN
+
     # stop from client
     with patch("zigpy.zcl.Cluster.request", return_value=[0x2, zcl_f.Status.SUCCESS]):
         await entity.async_stop_cover()
