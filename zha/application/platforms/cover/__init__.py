@@ -372,6 +372,16 @@ class Cover(PlatformEntity):
         self._determine_state()
         self.maybe_emit_state_changed_event()
 
+    def _track_target_lift_position(self, position: int | None):
+        """Track locally instigated lift movement."""
+        self._target_lift_position = position
+        self._lift_update_reported = False
+
+    def _track_target_tilt_position(self, position: int | None):
+        """Track locally instigated tilt movement."""
+        self._target_tilt_position = position
+        self._tilt_update_reported = False
+
     @staticmethod
     def _invert_position_for_zcl(position: int) -> int:
         """Convert the HA position to the ZCL position range.
@@ -409,86 +419,83 @@ class Cover(PlatformEntity):
 
     async def async_open_cover(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
         """Open the cover."""
-        self._target_lift_position = POSITION_OPEN
+        self._track_target_lift_position(POSITION_OPEN)
         res = await self._cover_cluster_handler.up_open()
         if res[1] is not Status.SUCCESS:
-            self._target_lift_position = None
+            self._track_target_lift_position(None)
             raise ZHAException(f"Failed to open cover: {res[1]}")
         self.async_update_state(STATE_OPENING)
 
     async def async_open_cover_tilt(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
         """Open the cover tilt."""
-        self._target_tilt_position = POSITION_OPEN
+        self._track_target_tilt_position(POSITION_OPEN)
         res = await self._cover_cluster_handler.go_to_tilt_percentage(
             self._invert_position_for_zcl(POSITION_OPEN)
         )
         if res[1] is not Status.SUCCESS:
-            self._target_tilt_position = None
+            self._track_target_tilt_position(None)
             raise ZHAException(f"Failed to open cover tilt: {res[1]}")
         self.async_update_state(STATE_OPENING)
 
     async def async_close_cover(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
         """Close the cover."""
-        self._target_lift_position = POSITION_CLOSED
-        self._lift_update_reported = False
+        self._track_target_lift_position(POSITION_CLOSED)
         res = await self._cover_cluster_handler.down_close()
         if res[1] is not Status.SUCCESS:
-            self._target_lift_position = None
+            self._track_target_lift_position(None)
             raise ZHAException(f"Failed to close cover: {res[1]}")
         self.async_update_state(STATE_CLOSING)
 
     async def async_close_cover_tilt(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
         """Close the cover tilt."""
-        self._target_tilt_position = POSITION_CLOSED
-        self._tilt_update_reported = False
+        self._track_target_tilt_position(POSITION_CLOSED)
         res = await self._cover_cluster_handler.go_to_tilt_percentage(
             self._invert_position_for_zcl(POSITION_CLOSED)
         )
         if res[1] is not Status.SUCCESS:
-            self._target_tilt_position = None
+            self._track_target_tilt_position(None)
             raise ZHAException(f"Failed to close cover tilt: {res[1]}")
         self.async_update_state(STATE_CLOSING)
 
     async def async_set_cover_position(self, **kwargs: Any) -> None:
         """Move the cover to a specific position."""
-        self._target_lift_position = kwargs[ATTR_POSITION]
-        assert self._target_lift_position is not None
         assert self.current_cover_position is not None
-        self._lift_update_reported = False
+        target_position = kwargs[ATTR_POSITION]
+        assert target_position is not None
+        self._track_target_lift_position(target_position)
         res = await self._cover_cluster_handler.go_to_lift_percentage(
-            self._invert_position_for_zcl(self._target_lift_position)
+            self._invert_position_for_zcl(target_position)
         )
         if res[1] is not Status.SUCCESS:
-            self._target_lift_position = None
+            self._track_target_lift_position(None)
             raise ZHAException(f"Failed to set cover position: {res[1]}")
         self.async_update_state(
             STATE_CLOSING
-            if self._target_lift_position < self.current_cover_position
+            if target_position < self.current_cover_position
             else STATE_OPENING
         )
 
     async def async_set_cover_tilt_position(self, **kwargs: Any) -> None:
         """Move the cover tilt to a specific position."""
-        self._target_tilt_position = kwargs[ATTR_TILT_POSITION]
-        assert self._target_tilt_position is not None
         assert self.current_cover_tilt_position is not None
-        self._tilt_update_reported = False
+        target_position = kwargs[ATTR_TILT_POSITION]
+        assert target_position is not None
+        self._track_target_tilt_position(target_position)
         res = await self._cover_cluster_handler.go_to_tilt_percentage(
-            self._invert_position_for_zcl(self._target_tilt_position)
+            self._invert_position_for_zcl(target_position)
         )
         if res[1] is not Status.SUCCESS:
-            self._target_tilt_position = None
+            self._track_target_tilt_position(None)
             raise ZHAException(f"Failed to set cover tilt position: {res[1]}")
         self.async_update_state(
             STATE_CLOSING
-            if self._target_tilt_position < self.current_cover_tilt_position
+            if target_position < self.current_cover_tilt_position
             else STATE_OPENING
         )
 
     async def async_stop_cover(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
         """Stop the cover."""
-        self._target_lift_position = None
-        self._lift_update_reported = False
+        self._track_target_lift_position(None)
         res = await self._cover_cluster_handler.stop()
         if res[1] is not Status.SUCCESS:
             raise ZHAException(f"Failed to stop cover: {res[1]}")
@@ -497,8 +504,7 @@ class Cover(PlatformEntity):
 
     async def async_stop_cover_tilt(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
         """Stop the cover tilt."""
-        self._target_tilt_position = None
-        self._tilt_update_reported = False
+        self._track_target_tilt_position(None)
         res = await self._cover_cluster_handler.stop()
         if res[1] is not Status.SUCCESS:
             raise ZHAException(f"Failed to stop cover: {res[1]}")
