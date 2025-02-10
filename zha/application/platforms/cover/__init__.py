@@ -99,8 +99,8 @@ class Cover(PlatformEntity):
 
         self._target_lift_position: int | None = None
         self._target_tilt_position: int | None = None
-        self._lift_update_reported: bool | None = None
-        self._tilt_update_reported: bool | None = None
+        self._lift_update_received: bool | None = None
+        self._tilt_update_received: bool | None = None
         self._lift_state: str | None = None
         self._tilt_state: str | None = None
         self._lift_position_history: deque[int | None] = deque(
@@ -278,7 +278,7 @@ class Cover(PlatformEntity):
         )
 
         _LOGGER.debug(
-            "_determine_state: lift=(state: %s, attr_update: %s, current: %s, target: %s, history: %s), tilt=(state: %s, attr_update: %s, current: %s, target: %s, history: %s)",
+            "_determine_state: lift=(state: %s, is_update: %s, current: %s, target: %s, history: %s), tilt=(state: %s, is_update: %s, current: %s, target: %s, history: %s)",
             self._lift_state,
             is_lift_update,
             self.current_cover_position,
@@ -293,9 +293,9 @@ class Cover(PlatformEntity):
 
         # Clear target position if the cover axis is not moving
         if self._lift_state not in (STATE_OPENING, STATE_CLOSING):
-            self._target_lift_position = None
+            self._track_target_lift_position(None)
         if self._tilt_state not in (STATE_OPENING, STATE_CLOSING):
-            self._target_tilt_position = None
+            self._track_target_tilt_position(None)
 
         # Start a movement timeout if the cover is moving, else cancel it
         if STATE_CLOSING in (self._lift_state, self._tilt_state) or STATE_OPENING in (
@@ -323,7 +323,7 @@ class Cover(PlatformEntity):
         # Pick lift state in preference over tilt
         self._state = self._lift_state or self._tilt_state
 
-    def _dynamic_timer_value(self) -> float:
+    def _dynamic_timeout(self) -> float:
         """Return a timer duration in seconds based on expected movement distance.
 
         This is required because some devices only report position updates after stopping.
@@ -332,23 +332,21 @@ class Cover(PlatformEntity):
         lift_timeout = 0.0
         tilt_timeout = 0.0
 
-        # Dynamic lift timeout if a local target is defined and the device has not reported a new position
+        # Calculate dynamic timeout durations if a target is defined and the device has not reported a new position
         if (
             self._target_lift_position is not None
             and self.current_cover_position is not None
-            and not self._lift_update_reported
+            and not self._lift_update_received
         ):
             lift_timeout = (
                 abs(self._target_lift_position - self.current_cover_position)
                 * 0.01
                 * LIFT_MOVEMENT_TIMEOUT_RANGE
             )
-
-        # Dynamic tilt timeout if a local target is defined and the device has not reported a new position
         if (
             self._target_tilt_position is not None
             and self.current_cover_tilt_position is not None
-            and not self._tilt_update_reported
+            and not self._tilt_update_received
         ):
             tilt_timeout = (
                 abs(self._target_tilt_position - self.current_cover_tilt_position)
@@ -356,22 +354,36 @@ class Cover(PlatformEntity):
                 * TILT_MOVEMENT_TIMEOUT_RANGE
             )
 
-        # Return the max axis timeout or default timeout if the max is 0
-        return max(lift_timeout, tilt_timeout) or DEFAULT_MOVEMENT_TIMEOUT
+        _LOGGER.debug(
+            "_dynamic_timeout: lift=(timeout: %s, current: %s, target: %s, update_received: %s), tilt=(timeout: %s, current: %s, target: %s, update_received: %s)",
+            lift_timeout,
+            self.current_cover_position,
+            self._target_lift_position,
+            self._lift_update_received,
+            tilt_timeout,
+            self.current_cover_tilt_position,
+            self._target_tilt_position,
+            self._tilt_update_received,
+        )
+
+        # Return the longest axis movement timeout
+        return max(lift_timeout, tilt_timeout)
 
     def _start_movement_timer(self, seconds: float = 0) -> None:
         """Start timer for clearing the current movement state."""
         if self._movement_timer:
             self._movement_timer.cancel()
-        duration = seconds or self._dynamic_timer_value()
+        duration = seconds or self._dynamic_timeout() or DEFAULT_MOVEMENT_TIMEOUT
         if duration <= 0:
             raise ZHAException(f"Invalid movement timer duration: {duration}")
+        _LOGGER.debug("Movement timer started with a duration of %s seconds", duration)
         self._movement_timer = self._loop.call_later(
             duration, self._clear_movement_state, duration
         )
 
     def _cancel_movement_timer(self) -> None:
         """Cancel the current movement timer."""
+        _LOGGER.debug("Movement timer cancelled")
         if self._movement_timer:
             self._movement_timer.cancel()
             self._movement_timer = None
@@ -387,14 +399,16 @@ class Cover(PlatformEntity):
     def _track_target_lift_position(self, position: int | None):
         """Track locally instigated lift movement."""
         self._target_lift_position = position
-        self._lift_update_reported = False
-        self._lift_state = None
+        if position is not None:
+            self._lift_update_received = False
+            self._lift_state = None
 
     def _track_target_tilt_position(self, position: int | None):
         """Track locally instigated tilt movement."""
         self._target_tilt_position = position
-        self._tilt_update_reported = False
-        self._tilt_state = None
+        if position is not None:
+            self._tilt_update_received = False
+            self._tilt_state = None
 
     @staticmethod
     def _invert_position_for_zcl(position: int) -> int:
@@ -415,11 +429,11 @@ class Cover(PlatformEntity):
         _LOGGER.debug("handle_cluster_handler_attribute_updated=%s", event)
         if event.attribute_id == WCAttrs.current_position_lift_percentage.id:
             self._lift_position_history.append(self.current_cover_position)
-            self._lift_update_reported = True
+            self._lift_update_received = True
             self._determine_state(is_lift_update=True)
         if event.attribute_id == WCAttrs.current_position_tilt_percentage.id:
             self._tilt_position_history.append(self.current_cover_tilt_position)
-            self._tilt_update_reported = True
+            self._tilt_update_received = True
             self._determine_state(is_tilt_update=True)
         self.maybe_emit_state_changed_event()
 
