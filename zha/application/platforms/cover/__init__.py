@@ -6,7 +6,7 @@ import asyncio
 from collections import deque
 import functools
 import logging
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from zigpy.zcl.clusters.general import OnOff
 from zigpy.zcl.foundation import Status
@@ -19,14 +19,11 @@ from zha.application.platforms.cover.const import (
     ATTR_TILT_POSITION,
     POSITION_CLOSED,
     POSITION_OPEN,
-    STATE_CLOSED,
-    STATE_CLOSING,
-    STATE_OPEN,
-    STATE_OPENING,
     WCT,
     ZCL_TO_COVER_DEVICE_CLASS,
     CoverDeviceClass,
     CoverEntityFeature,
+    CoverState,
     WCAttrs,
 )
 from zha.application.registries import PLATFORM_ENTITIES
@@ -101,8 +98,8 @@ class Cover(PlatformEntity):
         self._target_tilt_position: int | None = None
         self._lift_update_received: bool | None = None
         self._tilt_update_received: bool | None = None
-        self._lift_state: str | None = None
-        self._tilt_state: str | None = None
+        self._lift_state: CoverState | None = None
+        self._tilt_state: CoverState | None = None
         self._lift_position_history: deque[int | None] = deque(
             (self.current_cover_position,), maxlen=2
         )
@@ -112,7 +109,7 @@ class Cover(PlatformEntity):
         self._loop = asyncio.get_running_loop()
         self._movement_timer: asyncio.TimerHandle | None = None
 
-        self._state: str = STATE_OPEN
+        self._state: CoverState | None = CoverState.OPEN
         self._determine_state(refresh=True)
         self._cover_cluster_handler.on_event(
             CLUSTER_HANDLER_ATTRIBUTE_UPDATED,
@@ -122,9 +119,7 @@ class Cover(PlatformEntity):
     def restore_external_state_attributes(
         self,
         *,
-        state: Literal[
-            "open", "opening", "closed", "closing"
-        ],  # FIXME: why must these be expanded?
+        state: CoverState | None,
         target_lift_position: int | None = None,
         target_tilt_position: int | None = None,
     ):
@@ -162,12 +157,12 @@ class Cover(PlatformEntity):
     @property
     def is_opening(self) -> bool:
         """Return if the cover is opening or not."""
-        return self._state == STATE_OPENING
+        return self._state == CoverState.OPENING
 
     @property
     def is_closing(self) -> bool:
         """Return if the cover is closing or not."""
-        return self._state == STATE_CLOSING
+        return self._state == CoverState.CLOSING
 
     @property
     def current_cover_position(self) -> int | None:
@@ -242,10 +237,10 @@ class Cover(PlatformEntity):
             )
         ):
             # ZHA thinks the cover is moving
-            return STATE_OPENING if target > current else STATE_CLOSING
+            return CoverState.OPENING if target > current else CoverState.CLOSING
 
         # Return the static position
-        return STATE_OPEN if current > POSITION_CLOSED else STATE_CLOSED
+        return CoverState.OPEN if current > POSITION_CLOSED else CoverState.CLOSED
 
     def _determine_state(
         self,
@@ -292,13 +287,16 @@ class Cover(PlatformEntity):
         )
 
         # Clear target position if the cover axis is not moving
-        if self._lift_state not in (STATE_OPENING, STATE_CLOSING):
+        if self._lift_state not in (CoverState.OPENING, CoverState.CLOSING):
             self._track_target_lift_position(None)
-        if self._tilt_state not in (STATE_OPENING, STATE_CLOSING):
+        if self._tilt_state not in (CoverState.OPENING, CoverState.CLOSING):
             self._track_target_tilt_position(None)
 
         # Start a movement timeout if the cover is moving, else cancel it
-        if STATE_CLOSING in (self._lift_state, self._tilt_state) or STATE_OPENING in (
+        if CoverState.CLOSING in (
+            self._lift_state,
+            self._tilt_state,
+        ) or CoverState.OPENING in (
             self._lift_state,
             self._tilt_state,
         ):
@@ -309,15 +307,18 @@ class Cover(PlatformEntity):
         # Keep the last movement direction if either axis is still moving
         if (
             self.is_closing
-            and STATE_CLOSING in (self._lift_state, self._tilt_state)
+            and CoverState.CLOSING in (self._lift_state, self._tilt_state)
             or self.is_opening
-            and STATE_OPENING in (self._lift_state, self._tilt_state)
+            and CoverState.OPENING in (self._lift_state, self._tilt_state)
         ):
             return
 
         # An open tilt state overrides a closed lift state
-        if self._tilt_state == STATE_OPEN and self._lift_state == STATE_CLOSED:
-            self._state = STATE_OPEN
+        if (
+            self._tilt_state == CoverState.OPEN
+            and self._lift_state == CoverState.CLOSED
+        ):
+            self._state = CoverState.OPEN
             return
 
         # Pick lift state in preference over tilt
@@ -442,7 +443,7 @@ class Cover(PlatformEntity):
         _LOGGER.debug("async_update_state=%s", state)
         self._state = state
         self.maybe_emit_state_changed_event()
-        if state in (STATE_OPENING, STATE_CLOSING):
+        if state in (CoverState.OPENING, CoverState.CLOSING):
             self._start_movement_timer()
 
     async def async_open_cover(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
@@ -452,7 +453,7 @@ class Cover(PlatformEntity):
         if res[1] is not Status.SUCCESS:
             self._track_target_lift_position(None)
             raise ZHAException(f"Failed to open cover: {res[1]}")
-        self.async_update_state(STATE_OPENING)
+        self.async_update_state(CoverState.OPENING)
 
     async def async_open_cover_tilt(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
         """Open the cover tilt."""
@@ -463,7 +464,7 @@ class Cover(PlatformEntity):
         if res[1] is not Status.SUCCESS:
             self._track_target_tilt_position(None)
             raise ZHAException(f"Failed to open cover tilt: {res[1]}")
-        self.async_update_state(STATE_OPENING)
+        self.async_update_state(CoverState.OPENING)
 
     async def async_close_cover(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
         """Close the cover."""
@@ -472,7 +473,7 @@ class Cover(PlatformEntity):
         if res[1] is not Status.SUCCESS:
             self._track_target_lift_position(None)
             raise ZHAException(f"Failed to close cover: {res[1]}")
-        self.async_update_state(STATE_CLOSING)
+        self.async_update_state(CoverState.CLOSING)
 
     async def async_close_cover_tilt(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
         """Close the cover tilt."""
@@ -483,7 +484,7 @@ class Cover(PlatformEntity):
         if res[1] is not Status.SUCCESS:
             self._track_target_tilt_position(None)
             raise ZHAException(f"Failed to close cover tilt: {res[1]}")
-        self.async_update_state(STATE_CLOSING)
+        self.async_update_state(CoverState.CLOSING)
 
     async def async_set_cover_position(self, **kwargs: Any) -> None:
         """Move the cover to a specific position."""
@@ -498,9 +499,9 @@ class Cover(PlatformEntity):
             self._track_target_lift_position(None)
             raise ZHAException(f"Failed to set cover position: {res[1]}")
         self.async_update_state(
-            STATE_CLOSING
+            CoverState.CLOSING
             if target_position < self.current_cover_position
-            else STATE_OPENING
+            else CoverState.OPENING
         )
 
     async def async_set_cover_tilt_position(self, **kwargs: Any) -> None:
@@ -516,9 +517,9 @@ class Cover(PlatformEntity):
             self._track_target_tilt_position(None)
             raise ZHAException(f"Failed to set cover tilt position: {res[1]}")
         self.async_update_state(
-            STATE_CLOSING
+            CoverState.CLOSING
             if target_position < self.current_cover_tilt_position
-            else STATE_OPENING
+            else CoverState.OPENING
         )
 
     async def async_stop_cover(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
@@ -597,7 +598,7 @@ class Shade(PlatformEntity):
         if (closed := self.is_closed) is None:
             state = None
         else:
-            state = STATE_CLOSED if closed else STATE_OPEN
+            state = CoverState.CLOSED if closed else CoverState.OPEN
         response = super().state
         response.update(
             {

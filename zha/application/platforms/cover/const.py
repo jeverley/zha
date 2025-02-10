@@ -13,10 +13,14 @@ ATTR_TILT_POSITION: Final[str] = "tilt_position"
 POSITION_CLOSED: Final[int] = 0
 POSITION_OPEN: Final[int] = 100
 
-STATE_OPEN: Final[str] = "open"
-STATE_OPENING: Final[str] = "opening"
-STATE_CLOSED: Final[str] = "closed"
-STATE_CLOSING: Final[str] = "closing"
+
+class CoverState(StrEnum):
+    """State of Cover entities."""
+
+    CLOSED = "closed"
+    CLOSING = "closing"
+    OPEN = "open"
+    OPENING = "opening"
 
 
 class CoverDeviceClass(StrEnum):
