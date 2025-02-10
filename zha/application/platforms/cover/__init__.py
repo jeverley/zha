@@ -248,29 +248,24 @@ class Cover(PlatformEntity):
         is_tilt_update: bool = False,
         refresh: bool = False,
     ) -> None:
-        """Determine the state of the cover entity."""
+        """Determine the state of the cover entity.
 
-        # Determine state for lift and tilt axis
-        self._lift_state = (
-            self._determine_axis_state(
+        This considers current state of both the lift and tilt axis.
+        """
+        if self._lift_state is None or is_lift_update or refresh:
+            self._lift_state = self._determine_axis_state(
                 self.current_cover_position,
                 self._target_lift_position,
                 self._lift_position_history,
                 is_lift_update,
             )
-            if is_lift_update or refresh or self._lift_state is None
-            else self._lift_state
-        )
-        self._tilt_state = (
-            self._determine_axis_state(
+        if self._tilt_state is None or is_tilt_update or refresh:
+            self._tilt_state = self._determine_axis_state(
                 self.current_cover_tilt_position,
                 self._target_tilt_position,
                 self._tilt_position_history,
                 is_tilt_update,
             )
-            if is_tilt_update or refresh or self._tilt_state is None
-            else self._tilt_state
-        )
 
         _LOGGER.debug(
             "_determine_state: lift=(state: %s, is_update: %s, current: %s, target: %s, history: %s), tilt=(state: %s, is_update: %s, current: %s, target: %s, history: %s)",
