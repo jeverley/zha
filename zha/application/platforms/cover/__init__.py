@@ -518,8 +518,12 @@ class Cover(PlatformEntity):
         )
 
     async def async_stop_cover(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
-        """Stop the cover."""
+        """Stop the cover.
+
+        Upon receipt of this command the cover stops both lift and tilt movement.
+        """
         self._track_target_lift_position(None)
+        self._track_target_tilt_position(None)
         res = await self._cover_cluster_handler.stop()
         if res[1] is not Status.SUCCESS:
             raise ZHAException(f"Failed to stop cover: {res[1]}")
@@ -527,13 +531,11 @@ class Cover(PlatformEntity):
         self.maybe_emit_state_changed_event()
 
     async def async_stop_cover_tilt(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
-        """Stop the cover tilt."""
-        self._track_target_tilt_position(None)
-        res = await self._cover_cluster_handler.stop()
-        if res[1] is not Status.SUCCESS:
-            raise ZHAException(f"Failed to stop cover: {res[1]}")
-        self._determine_state(refresh=True)
-        self.maybe_emit_state_changed_event()
+        """Stop the cover tilt.
+
+        This is handled by async_stop_cover because there is no tilt specific command for Zigbee covers.
+        """
+        await self.async_stop_cover(**kwargs)
 
 
 @MULTI_MATCH(
