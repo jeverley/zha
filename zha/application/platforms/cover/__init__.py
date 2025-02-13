@@ -84,7 +84,7 @@ class Cover(PlatformEntity):
         self._cover_cluster_handler: WindowCoveringClusterHandler = cast(
             WindowCoveringClusterHandler, cluster_handler
         )
-        if self._cover_cluster_handler.window_covering_type:
+        if self._cover_cluster_handler.window_covering_type is not None:
             self._attr_device_class: CoverDeviceClass | None = (
                 ZCL_TO_COVER_DEVICE_CLASS.get(
                     self._cover_cluster_handler.window_covering_type
