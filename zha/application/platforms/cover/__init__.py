@@ -315,12 +315,13 @@ class Cover(PlatformEntity):
         ):
             return
 
-        # An open tilt state overrides a closed lift state
-        if (
-            self._tilt_state == CoverState.OPEN
-            and self._lift_state == CoverState.CLOSED
-        ):
-            self._state = CoverState.OPEN
+        # An open or moving tilt state overrides a static lift state
+        if self._tilt_state in (
+            CoverState.OPEN,
+            CoverState.OPENING,
+            CoverState.CLOSING,
+        ) and self._lift_state in (CoverState.CLOSED, CoverState.OPEN):
+            self._state = self._tilt_state
             return
 
         # Pick lift state in preference over tilt

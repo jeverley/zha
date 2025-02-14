@@ -146,6 +146,7 @@ async def test_cover(
 
     # Upper limit for dynamic timeout
     LIFT_MOVEMENT_TIMEOUT_RANGE: float = 300
+    TILT_MOVEMENT_TIMEOUT_RANGE: float = 30
 
     zigpy_cover_device = create_mock_zigpy_device(zha_gateway, ZIGPY_COVER_DEVICE)
     cluster = zigpy_cover_device.endpoints.get(1).window_covering
@@ -328,6 +329,7 @@ async def test_cover(
 
     # test set position command, starting at 100 % / 0 ZCL (open) from previous lift test
     with patch("zigpy.zcl.Cluster.request", return_value=[0x5, zcl_f.Status.SUCCESS]):
+        assert entity.state["current_position"] == 100
         await entity.async_set_cover_position(position=47)  # 53 when inverted for ZCL
         await zha_gateway.async_block_till_done()
         assert cluster.request.call_count == 1
@@ -337,7 +339,6 @@ async def test_cover(
         assert cluster.request.call_args[0][3] == 53
         assert cluster.request.call_args[1]["expect_reply"] is True
 
-        assert entity.state["current_position"] == 100
         assert entity.state["state"] == CoverState.CLOSING
 
         await send_attributes_report(
@@ -360,6 +361,7 @@ async def test_cover(
 
     # test set tilt position command, starting at 100 % / 0 ZCL (open) from previous tilt test
     with patch("zigpy.zcl.Cluster.request", return_value=[0x5, zcl_f.Status.SUCCESS]):
+        assert entity.state["current_tilt_position"] == 100
         await entity.async_set_cover_tilt_position(
             tilt_position=47
         )  # 53 when inverted for ZCL
@@ -380,12 +382,14 @@ async def test_cover(
             zha_gateway, cluster, {WCAttrs.current_position_tilt_percentage.id: 35}
         )
 
+        assert entity.state["current_tilt_position"] == 65
         assert entity.state["state"] == CoverState.CLOSING
 
         await send_attributes_report(
             zha_gateway, cluster, {WCAttrs.current_position_tilt_percentage.id: 53}
         )
 
+        assert entity.state["current_tilt_position"] == 47
         assert entity.state["state"] == CoverState.OPEN
 
         # verify that a subsequent go_to command does not change the state to closing/opening
@@ -416,8 +420,34 @@ async def test_cover(
 
         # wait the timer duration
         await asyncio.sleep(DEFAULT_MOVEMENT_TIMEOUT)
+        assert entity.state["state"] == CoverState.OPEN
 
-        assert entity.state["current_position"] == 30
+    # test interrupted tilt movement (e.g. device button press), starting from 47 %
+    with patch("zigpy.zcl.Cluster.request", return_value=[0x5, zcl_f.Status.SUCCESS]):
+        await entity.async_set_cover_tilt_position(
+            tilt_position=0
+        )  # 100 when inverted for ZCL
+        await zha_gateway.async_block_till_done()
+        assert cluster.request.call_count == 1
+        assert cluster.request.call_args[0][0] is False
+        assert cluster.request.call_args[0][1] == 0x08
+        assert cluster.request.call_args[0][2].command.name == "go_to_tilt_percentage"
+        assert cluster.request.call_args[0][3] == 100
+        assert cluster.request.call_args[1]["expect_reply"] is True
+
+        assert entity.state["current_tilt_position"] == 47
+        assert entity.state["state"] == CoverState.CLOSING
+
+        # simulate a device position update to set timer to the default duration rather than dynamic
+        await send_attributes_report(
+            zha_gateway, cluster, {WCAttrs.current_position_tilt_percentage.id: 70}
+        )
+
+        assert entity.state["current_tilt_position"] == 30
+        assert entity.state["state"] == CoverState.CLOSING
+
+        # wait the timer duration
+        await asyncio.sleep(DEFAULT_MOVEMENT_TIMEOUT)
         assert entity.state["state"] == CoverState.OPEN
 
     # test device instigated movement (e.g. device button press), starting from 30 %
@@ -434,8 +464,22 @@ async def test_cover(
 
         # wait the default timer duration
         await asyncio.sleep(DEFAULT_MOVEMENT_TIMEOUT)
+        assert entity.state["state"] == CoverState.OPEN
 
-        assert entity.state["current_position"] == 40
+    # test device instigated tilt movement (e.g. device button press), starting from 30 %
+    with patch("zigpy.zcl.Cluster.request", return_value=[0x5, zcl_f.Status.SUCCESS]):
+        assert entity.state["current_tilt_position"] == 30
+        assert entity.state["state"] == CoverState.OPEN
+
+        await send_attributes_report(
+            zha_gateway, cluster, {WCAttrs.current_position_tilt_percentage.id: 60}
+        )
+
+        assert entity.state["current_tilt_position"] == 40
+        assert entity.state["state"] == CoverState.OPENING
+
+        # wait the default timer duration
+        await asyncio.sleep(DEFAULT_MOVEMENT_TIMEOUT)
         assert entity.state["state"] == CoverState.OPEN
 
     # test dynamic movement timeout, starting from 40 % and moving to 90 %
@@ -463,6 +507,35 @@ async def test_cover(
             (50 * 0.01 * LIFT_MOVEMENT_TIMEOUT_RANGE) - DEFAULT_MOVEMENT_TIMEOUT
         )
         assert entity.state["current_position"] == 40
+        assert entity.state["state"] == CoverState.OPEN
+
+    # test dynamic tilt movement timeout, starting from 40 % and moving to 90 %
+    with patch("zigpy.zcl.Cluster.request", return_value=[0x5, zcl_f.Status.SUCCESS]):
+        assert entity.state["current_tilt_position"] == 40
+        assert entity.state["state"] == CoverState.OPEN
+
+        await entity.async_set_cover_tilt_position(
+            tilt_position=90
+        )  # 10 when inverted for ZCL
+        await zha_gateway.async_block_till_done()
+        assert cluster.request.call_count == 1
+        assert cluster.request.call_args[0][0] is False
+        assert cluster.request.call_args[0][1] == 0x08
+        assert cluster.request.call_args[0][2].command.name == "go_to_tilt_percentage"
+        assert cluster.request.call_args[0][3] == 10
+        assert cluster.request.call_args[1]["expect_reply"] is True
+
+        assert entity.state["state"] == CoverState.OPENING
+
+        # wait the default timer duration and verify status is still opening
+        await asyncio.sleep(DEFAULT_MOVEMENT_TIMEOUT)
+        assert entity.state["state"] == CoverState.OPENING
+
+        # wait the remainder of the dynamic timeout and check if the movement timed out: (50% * 30 seconds) - default
+        await asyncio.sleep(
+            (50 * 0.01 * TILT_MOVEMENT_TIMEOUT_RANGE) - DEFAULT_MOVEMENT_TIMEOUT
+        )
+        assert entity.state["current_tilt_position"] == 40
         assert entity.state["state"] == CoverState.OPEN
 
     # stop from client
