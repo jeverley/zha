@@ -224,8 +224,7 @@ class Cover(PlatformEntity):
         When a target is defined the logic aims to mitigate split-brain scenarios
         where a HA command is interrupted by a device button press/physical obstruction.
 
-        The logic considers previous position to determine if the cover is moving,
-        if the position has not changed between two device updates it is not moving.
+        The logic considers previous position to determine if the cover is moving.
         """
 
         if current is None:
@@ -330,7 +329,7 @@ class Cover(PlatformEntity):
     def _dynamic_timeout(self) -> float:
         """Return a timer duration in seconds based on expected movement distance.
 
-        This is required because some devices only report position updates after stopping.
+        This is required because some devices only report a position update after stopping.
         """
 
         lift_timeout = 0.0
@@ -374,7 +373,7 @@ class Cover(PlatformEntity):
         return max(lift_timeout, tilt_timeout)
 
     def _start_movement_timer(self, seconds: float = 0) -> None:
-        """Start timer for clearing the current movement state."""
+        """Start timer for clearing the movement state (opening/closing)."""
         if self._movement_timer:
             self._movement_timer.cancel()
         duration = seconds or self._dynamic_timeout() or DEFAULT_MOVEMENT_TIMEOUT
@@ -386,14 +385,14 @@ class Cover(PlatformEntity):
         )
 
     def _cancel_movement_timer(self) -> None:
-        """Cancel the current movement timer."""
+        """Cancel the movement timer."""
         _LOGGER.debug("Movement timer cancelled")
         if self._movement_timer:
             self._movement_timer.cancel()
             self._movement_timer = None
 
     def _clear_movement_state(self, duration: float, _=None) -> None:
-        """Clear the moving state of the cover due to inactivity."""
+        """Clear the movement state due to inactivity."""
         _LOGGER.debug("No movement reported for %s seconds", duration)
         self._target_lift_position = None
         self._target_tilt_position = None
@@ -401,21 +400,21 @@ class Cover(PlatformEntity):
         self.maybe_emit_state_changed_event()
 
     def _track_target_lift_position(self, position: int | None):
-        """Track locally instigated lift movement."""
+        """Track locally instigated lift target."""
         self._target_lift_position = position
         if position is not None:
             self._lift_update_received = False
             self._lift_state = None
 
     def _track_target_tilt_position(self, position: int | None):
-        """Track locally instigated tilt movement."""
+        """Track locally instigated tilt target."""
         self._target_tilt_position = position
         if position is not None:
             self._tilt_update_received = False
             self._tilt_state = None
 
     @staticmethod
-    def _invert_position_for_zcl(position: int) -> int:
+    def _ha_to_zcl_position(position: int) -> int:
         """Convert the HA position to the ZCL position range.
 
         In HA None is unknown, 0 is closed, 100 is fully open.
@@ -462,7 +461,7 @@ class Cover(PlatformEntity):
         """Open the cover tilt."""
         self._track_target_tilt_position(POSITION_OPEN)
         res = await self._cover_cluster_handler.go_to_tilt_percentage(
-            self._invert_position_for_zcl(POSITION_OPEN)
+            self._ha_to_zcl_position(POSITION_OPEN)
         )
         if res[1] is not Status.SUCCESS:
             self._track_target_tilt_position(None)
@@ -482,7 +481,7 @@ class Cover(PlatformEntity):
         """Close the cover tilt."""
         self._track_target_tilt_position(POSITION_CLOSED)
         res = await self._cover_cluster_handler.go_to_tilt_percentage(
-            self._invert_position_for_zcl(POSITION_CLOSED)
+            self._ha_to_zcl_position(POSITION_CLOSED)
         )
         if res[1] is not Status.SUCCESS:
             self._track_target_tilt_position(None)
@@ -496,7 +495,7 @@ class Cover(PlatformEntity):
         assert target_position is not None
         self._track_target_lift_position(target_position)
         res = await self._cover_cluster_handler.go_to_lift_percentage(
-            self._invert_position_for_zcl(target_position)
+            self._ha_to_zcl_position(target_position)
         )
         if res[1] is not Status.SUCCESS:
             self._track_target_lift_position(None)
@@ -514,7 +513,7 @@ class Cover(PlatformEntity):
         assert target_position is not None
         self._track_target_tilt_position(target_position)
         res = await self._cover_cluster_handler.go_to_tilt_percentage(
-            self._invert_position_for_zcl(target_position)
+            self._ha_to_zcl_position(target_position)
         )
         if res[1] is not Status.SUCCESS:
             self._track_target_tilt_position(None)
@@ -580,8 +579,7 @@ class Shade(PlatformEntity):
         self._is_open: bool = bool(self._on_off_cluster_handler.on_off)
         position = self._level_cluster_handler.current_level
         if position is not None:
-            position = max(0, min(255, position))
-            position = int(position * 100 / 255)
+            position = self._zcl_to_ha_position(position)
         self._position: int | None = position
         self._on_off_cluster_handler.on_event(
             CLUSTER_HANDLER_ATTRIBUTE_UPDATED,
@@ -657,8 +655,7 @@ class Shade(PlatformEntity):
 
     def handle_cluster_handler_set_level(self, event: LevelChangeEvent) -> None:
         """Set the reported position."""
-        value = max(0, min(255, event.level))
-        self._position = int(value * 100 / 255)
+        self._position = self._zcl_to_ha_position(event.level)
         self.maybe_emit_state_changed_event()
 
     async def async_open_cover(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
@@ -683,7 +680,7 @@ class Shade(PlatformEntity):
         """Move the roller shutter to a specific position."""
         new_pos = kwargs[ATTR_POSITION]
         res = await self._level_cluster_handler.move_to_level_with_on_off(
-            new_pos * 255 / 100, 1
+            self._ha_to_zcl_position(new_pos), 1
         )
 
         if res[1] != Status.SUCCESS:
@@ -697,6 +694,17 @@ class Shade(PlatformEntity):
         res = await self._level_cluster_handler.stop()
         if res[1] != Status.SUCCESS:
             raise ZHAException(f"Failed to stop cover: {res[1]}")
+
+    @staticmethod
+    def _zcl_to_ha_position(level: int) -> int:
+        """Convert the ZCL level to the HA position range."""
+        level = max(0, min(255, level))
+        return round(level * 100 / 255)
+
+    @staticmethod
+    def _ha_to_zcl_position(position: int) -> int:
+        """Convert the HA position to the ZCL level range."""
+        return round(position * 255 / 100)
 
 
 @MULTI_MATCH(
@@ -714,7 +722,7 @@ class KeenVent(Shade):
         position = self._position or 100
         await asyncio.gather(
             self._level_cluster_handler.move_to_level_with_on_off(
-                position * 255 / 100, 1
+                self._ha_to_zcl_position(position), 1
             ),
             self._on_off_cluster_handler.on(),
         )
