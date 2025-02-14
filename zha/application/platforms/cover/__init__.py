@@ -15,6 +15,7 @@ from zha.application import Platform
 from zha.application.platforms import PlatformEntity
 from zha.application.platforms.cover.const import (
     ATTR_CURRENT_POSITION,
+    ATTR_CURRENT_TILT_POSITION,
     ATTR_POSITION,
     ATTR_TILT_POSITION,
     POSITION_CLOSED,
@@ -101,10 +102,10 @@ class Cover(PlatformEntity):
         self._lift_state: CoverState | None = None
         self._tilt_state: CoverState | None = None
         self._lift_position_history: deque[int | None] = deque(
-            (self.current_cover_position,), maxlen=2
+            [self.current_cover_position], maxlen=2
         )
         self._tilt_position_history: deque[int | None] = deque(
-            (self.current_cover_tilt_position,), maxlen=2
+            [self.current_cover_tilt_position], maxlen=2
         )
         self._loop = asyncio.get_running_loop()
         self._movement_timer: asyncio.TimerHandle | None = None
@@ -139,6 +140,7 @@ class Cover(PlatformEntity):
         response.update(
             {
                 ATTR_CURRENT_POSITION: self.current_cover_position,
+                ATTR_CURRENT_TILT_POSITION: self.current_cover_tilt_position,
                 "state": self._state,
                 "is_opening": self.is_opening,
                 "is_closing": self.is_closing,
@@ -171,13 +173,19 @@ class Cover(PlatformEntity):
         In HA None is unknown, 0 is closed, 100 is fully open.
         In ZCL 0 is fully open, 100 is fully closed.
         Keep in mind the values have already been flipped to match HA
-        in the WindowCovering cluster handler
+        in the WindowCovering cluster handler.
         """
         return self._cover_cluster_handler.current_position_lift_percentage
 
     @property
     def current_cover_tilt_position(self) -> int | None:
-        """Return the current tilt position of the cover."""
+        """Return the current tilt position of the cover.
+
+        In HA None is unknown, 0 is closed, 100 is fully open.
+        In ZCL 0 is fully open, 100 is fully closed.
+        Keep in mind the values have already been flipped to match HA
+        in the WindowCovering cluster handler.
+        """
         return self._cover_cluster_handler.current_position_tilt_percentage
 
     def _determine_supported_features(self) -> CoverEntityFeature:
