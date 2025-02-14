@@ -455,6 +455,8 @@ class Cover(PlatformEntity):
         if res[1] is not Status.SUCCESS:
             self._track_target_lift_position(None)
             raise ZHAException(f"Failed to open cover: {res[1]}")
+        if self.current_cover_position == POSITION_OPEN:
+            return
         self.async_update_state(CoverState.OPENING)
 
     async def async_open_cover_tilt(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
@@ -466,6 +468,8 @@ class Cover(PlatformEntity):
         if res[1] is not Status.SUCCESS:
             self._track_target_tilt_position(None)
             raise ZHAException(f"Failed to open cover tilt: {res[1]}")
+        if self.current_cover_tilt_position == POSITION_OPEN:
+            return
         self.async_update_state(CoverState.OPENING)
 
     async def async_close_cover(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
@@ -475,6 +479,8 @@ class Cover(PlatformEntity):
         if res[1] is not Status.SUCCESS:
             self._track_target_lift_position(None)
             raise ZHAException(f"Failed to close cover: {res[1]}")
+        if self.current_cover_position == POSITION_CLOSED:
+            return
         self.async_update_state(CoverState.CLOSING)
 
     async def async_close_cover_tilt(self, **kwargs: Any) -> None:  # pylint: disable=unused-argument
@@ -486,6 +492,8 @@ class Cover(PlatformEntity):
         if res[1] is not Status.SUCCESS:
             self._track_target_tilt_position(None)
             raise ZHAException(f"Failed to close cover tilt: {res[1]}")
+        if self.current_cover_tilt_position == POSITION_CLOSED:
+            return
         self.async_update_state(CoverState.CLOSING)
 
     async def async_set_cover_position(self, **kwargs: Any) -> None:
@@ -500,6 +508,8 @@ class Cover(PlatformEntity):
         if res[1] is not Status.SUCCESS:
             self._track_target_lift_position(None)
             raise ZHAException(f"Failed to set cover position: {res[1]}")
+        if target_position == self.current_cover_position:
+            return
         self.async_update_state(
             CoverState.CLOSING
             if target_position < self.current_cover_position
@@ -518,6 +528,8 @@ class Cover(PlatformEntity):
         if res[1] is not Status.SUCCESS:
             self._track_target_tilt_position(None)
             raise ZHAException(f"Failed to set cover tilt position: {res[1]}")
+        if target_position == self.current_cover_tilt_position:
+            return
         self.async_update_state(
             CoverState.CLOSING
             if target_position < self.current_cover_tilt_position
