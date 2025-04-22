@@ -18,6 +18,7 @@ from zhaquirks.xiaomi.aqara.magnet_ac01 import OppleCluster as MagnetAC01OppleCl
 from zhaquirks.xiaomi.aqara.switch_acn047 import OppleCluster as T2RelayOppleCluster
 from zigpy import types
 from zigpy.quirks.v2 import ZCLEnumMetadata
+from zigpy.zcl.clusters.closures import WindowCovering
 from zigpy.zcl.clusters.general import OnOff
 from zigpy.zcl.clusters.security import IasWd
 
@@ -28,6 +29,7 @@ from zha.application.registries import PLATFORM_ENTITIES
 from zha.zigbee.cluster_handlers import ClusterAttributeUpdatedEvent
 from zha.zigbee.cluster_handlers.const import (
     CLUSTER_HANDLER_ATTRIBUTE_UPDATED,
+    CLUSTER_HANDLER_COVER,
     CLUSTER_HANDLER_HUE_OCCUPANCY,
     CLUSTER_HANDLER_IAS_WD,
     CLUSTER_HANDLER_INOVELLI,
@@ -161,6 +163,16 @@ class DefaultStrobeSelectEntity(NonZCLSelectEntity):
     _unique_id_suffix = "Strobe"
     _enum = Strobe
     _attr_translation_key: str = "default_strobe"
+
+
+@CONFIG_DIAGNOSTIC_MATCH(cluster_handler_names=CLUSTER_HANDLER_COVER)
+class WindowCoveringTypeOverrideSelectEntity(NonZCLSelectEntity):
+    """Representation of a ZHA window covering type override select entity."""
+
+    _unique_id_suffix = WindowCovering.WindowCoveringType.__name__ + "_override"
+    _enum = WindowCovering.WindowCoveringType
+    _attr_entity_registry_enabled_default: bool = False
+    _attr_translation_key: str = "window_covering_type_override"
 
 
 class ZCLEnumSelectEntity(PlatformEntity):

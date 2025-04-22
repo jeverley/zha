@@ -140,12 +140,6 @@ class Cover(BaseCover):
         self._cover_cluster_handler: WindowCoveringClusterHandler = cast(
             WindowCoveringClusterHandler, cluster_handler
         )
-        if self._cover_cluster_handler.window_covering_type is not None:
-            self._attr_device_class: CoverDeviceClass | None = (
-                ZCL_TO_COVER_DEVICE_CLASS.get(
-                    self._cover_cluster_handler.window_covering_type
-                )
-            )
         self._attr_supported_features: CoverEntityFeature = CoverEntityFeature(0)
         self.recompute_capabilities()
 
@@ -171,8 +165,14 @@ class Cover(BaseCover):
         super().recompute_capabilities()
         supported_features = CoverEntityFeature(0)
 
+        # Set the cover device class
+        if self._window_covering_type is not None:
+            self._attr_device_class: CoverDeviceClass | None = (
+                ZCL_TO_COVER_DEVICE_CLASS.get(self._window_covering_type)
+            )
+
         # Enable lift features if the window covering type is not tilt only
-        if self._cover_cluster_handler.window_covering_type not in (
+        if self._window_covering_type not in (
             WCT.Shutter,
             WCT.Tilt_blind_tilt_only,
         ):
@@ -184,7 +184,7 @@ class Cover(BaseCover):
             )
 
         # Enable tilt features if the window covering type supports tilt
-        if self._cover_cluster_handler.window_covering_type in (
+        if self._window_covering_type in (
             WCT.Shutter,
             WCT.Tilt_blind_tilt_only,
             WCT.Tilt_blind_tilt_and_lift,
@@ -239,6 +239,21 @@ class Cover(BaseCover):
                 DEFAULT_MOVEMENT_TIMEOUT,
                 functools.partial(self._determine_cover_state, refresh=True),
             )
+        )
+
+    @property
+    def _window_covering_type(self) -> WCT:
+        """Return the Window Covering Type value.
+
+        The user override takes priority over the device cluster value.
+        """
+        type_override_cache = self._cover_cluster_handler.data_cache.get(
+            WCT.__name__ + "_override"
+        )
+        return (
+            type_override_cache.value
+            if type_override_cache is not None
+            else self._cover_cluster_handler.window_covering_type
         )
 
     @property
