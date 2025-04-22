@@ -169,10 +169,10 @@ class DefaultStrobeSelectEntity(NonZCLSelectEntity):
 class WindowCoveringTypeOverrideSelectEntity(NonZCLSelectEntity):
     """Representation of a ZHA window covering type override select entity."""
 
-    _unique_id_suffix = WindowCovering.WindowCoveringType.__name__ + "_override"
+    _unique_id_suffix = WindowCovering.WindowCoveringType.__name__
     _enum = WindowCovering.WindowCoveringType
     _attr_entity_registry_enabled_default: bool = False
-    _attr_translation_key: str = "window_covering_type_override"
+    _attr_translation_key: str = "device_mode"
 
 
 class ZCLEnumSelectEntity(PlatformEntity):

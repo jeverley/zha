@@ -247,14 +247,14 @@ class Cover(BaseCover):
 
         The user override takes priority over the device cluster value.
         """
-        type_override_cache = self._cover_cluster_handler.data_cache.get(
-            WCT.__name__ + "_override"
-        )
-        return (
-            type_override_cache.value
-            if type_override_cache is not None
-            else self._cover_cluster_handler.window_covering_type
-        )
+        type_override_cache = self._cover_cluster_handler.data_cache.get(WCT.__name__)
+        if type_override_cache is not None:
+            _LOGGER.debug(
+                "A local window_covering_type override of %s is configured",
+                type_override_cache.value,
+            )
+            return type_override_cache.value
+        return self._cover_cluster_handler.window_covering_type
 
     @property
     def supported_features(self) -> CoverEntityFeature:
