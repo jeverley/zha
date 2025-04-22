@@ -26,7 +26,10 @@ from zha.application import Platform
 from zha.application.const import Strobe
 from zha.application.platforms import BaseEntityInfo, EntityCategory, PlatformEntity
 from zha.application.registries import PLATFORM_ENTITIES
-from zha.zigbee.cluster_handlers import ClusterAttributeUpdatedEvent
+from zha.zigbee.cluster_handlers import (
+    ClusterAttributeUpdatedEvent,
+    ClusterStateChangedEvent,
+)
 from zha.zigbee.cluster_handlers.const import (
     CLUSTER_HANDLER_ATTRIBUTE_UPDATED,
     CLUSTER_HANDLER_COVER,
@@ -35,6 +38,7 @@ from zha.zigbee.cluster_handlers.const import (
     CLUSTER_HANDLER_INOVELLI,
     CLUSTER_HANDLER_OCCUPANCY,
     CLUSTER_HANDLER_ON_OFF,
+    CLUSTER_HANDLER_STATE_CHANGED,
     CLUSTER_HANDLER_THERMOSTAT,
 )
 
@@ -173,6 +177,26 @@ class WindowCoveringTypeOverrideSelectEntity(NonZCLSelectEntity):
     _enum = WindowCovering.WindowCoveringType
     _attr_entity_registry_enabled_default: bool = False
     _attr_translation_key: str = "device_mode"
+
+    async def async_select_option(self, option: str) -> None:
+        """Change the selected option."""
+        await super().async_select_option(option)
+        self._cluster_handler.emit(
+            CLUSTER_HANDLER_STATE_CHANGED,
+            ClusterStateChangedEvent(),
+        )
+
+    def restore_external_state_attributes(
+        self,
+        *,
+        state: str,
+    ) -> None:
+        """Restore extra state attributes that are stored outside of the ZCL cache."""
+        super().restore_external_state_attributes(state=state)
+        self._cluster_handler.emit(
+            CLUSTER_HANDLER_STATE_CHANGED,
+            ClusterStateChangedEvent(),
+        )
 
 
 class ZCLEnumSelectEntity(PlatformEntity):

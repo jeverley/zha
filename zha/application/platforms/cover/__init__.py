@@ -30,7 +30,10 @@ from zha.application.platforms.cover.const import (
 )
 from zha.application.registries import PLATFORM_ENTITIES
 from zha.exceptions import ZHAException
-from zha.zigbee.cluster_handlers import ClusterAttributeUpdatedEvent
+from zha.zigbee.cluster_handlers import (
+    ClusterAttributeUpdatedEvent,
+    ClusterStateChangedEvent,
+)
 from zha.zigbee.cluster_handlers.closures import WindowCoveringClusterHandler
 from zha.zigbee.cluster_handlers.const import (
     CLUSTER_HANDLER_ATTRIBUTE_UPDATED,
@@ -39,6 +42,7 @@ from zha.zigbee.cluster_handlers.const import (
     CLUSTER_HANDLER_LEVEL_CHANGED,
     CLUSTER_HANDLER_ON_OFF,
     CLUSTER_HANDLER_SHADE,
+    CLUSTER_HANDLER_STATE_CHANGED,
 )
 from zha.zigbee.cluster_handlers.general import LevelChangeEvent
 
@@ -207,6 +211,12 @@ class Cover(BaseCover):
                 self.handle_cluster_handler_attribute_updated,
             )
         )
+        self._on_remove_callbacks.append(
+            self._cover_cluster_handler.on_event(
+                CLUSTER_HANDLER_STATE_CHANGED,
+                self.handle_cluster_handler_state_changed,
+            )
+        )
         self._on_remove_callbacks.extend(
             (self._clear_lift_transition, self._clear_tilt_transition)
         )
@@ -250,7 +260,7 @@ class Cover(BaseCover):
         type_override_cache = self._cover_cluster_handler.data_cache.get(WCT.__name__)
         if type_override_cache is not None:
             _LOGGER.debug(
-                "A local window_covering_type override of %s is configured",
+                "A 'window_covering_type' override is configured: %s",
                 type_override_cache.value,
             )
             return type_override_cache.value
@@ -558,6 +568,17 @@ class Cover(BaseCover):
         elif event.attribute_id == WCAttrs.current_position_tilt_percentage.id:
             self._tilt_position_history.append(self.current_cover_tilt_position)
             self._determine_cover_state(is_tilt_update=True)
+
+    def handle_cluster_handler_state_changed(
+        self,
+        event: ClusterStateChangedEvent,  # pylint: disable=unused-argument
+    ) -> None:
+        """Handle entity state changes for the cluster.
+
+        Used to recompute capabilities when a user selects a window covering type override.
+        """
+        self.recompute_capabilities()
+        self.maybe_emit_state_changed_event()
 
     def async_update_state(self, state):
         """Handle state update from HA operations below."""
