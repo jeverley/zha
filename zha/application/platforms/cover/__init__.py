@@ -140,17 +140,13 @@ class Cover(BaseCover):
         super().__init__(cluster_handlers, endpoint, device, **kwargs)
         cluster_handler = self.cluster_handlers.get(CLUSTER_HANDLER_COVER)
         assert cluster_handler
-
         self._cover_cluster_handler: WindowCoveringClusterHandler = cast(
             WindowCoveringClusterHandler, cluster_handler
         )
-        self._attr_supported_features: CoverEntityFeature = CoverEntityFeature(0)
         self.recompute_capabilities()
 
         self._target_lift_position: int | None = None
         self._target_tilt_position: int | None = None
-        self._lift_state: CoverState | None = None
-        self._tilt_state: CoverState | None = None
         self._lift_position_history: deque[int | None] = deque(
             [self.current_cover_position], maxlen=2
         )
@@ -161,22 +157,38 @@ class Cover(BaseCover):
         self._lift_transition_timer: asyncio.TimerHandle | None = None
         self._tilt_transition_timer: asyncio.TimerHandle | None = None
 
+        self._lift_state: CoverState | None = None
+        self._tilt_state: CoverState | None = None
         self._state: CoverState | None = None
         self._determine_cover_state(refresh=True)
 
     def recompute_capabilities(self) -> None:
-        """Recompute capabilities and feature flags based on the window covering type."""
-        super().recompute_capabilities()
-        supported_features = CoverEntityFeature(0)
+        """Recompute capabilities, device class and feature flags from on the window covering type.
 
-        # Set the cover device class
-        if self._window_covering_type is not None:
-            self._attr_device_class: CoverDeviceClass | None = (
-                ZCL_TO_COVER_DEVICE_CLASS.get(self._window_covering_type)
-            )
+        The local window covering type override takes priority over the device cluster value.
+        """
+        super().recompute_capabilities()
+
+        # Get the window covering type
+        window_covering_type_override = self._cover_cluster_handler.data_cache.get(
+            WCT.__name__
+        )
+        window_covering_type = (
+            WCT(window_covering_type_override.value)
+            if window_covering_type_override is not None
+            else self._cover_cluster_handler.window_covering_type
+        )
+
+        # Determine the cover device class
+        self._attr_device_class: CoverDeviceClass | None = (
+            (ZCL_TO_COVER_DEVICE_CLASS.get(window_covering_type))
+            if window_covering_type is not None
+            else None
+        )
 
         # Enable lift features if the window covering type is not tilt only
-        if self._window_covering_type not in (
+        supported_features = CoverEntityFeature(0)
+        if window_covering_type not in (
             WCT.Shutter,
             WCT.Tilt_blind_tilt_only,
         ):
@@ -188,7 +200,7 @@ class Cover(BaseCover):
             )
 
         # Enable tilt features if the window covering type supports tilt
-        if self._window_covering_type in (
+        if window_covering_type in (
             WCT.Shutter,
             WCT.Tilt_blind_tilt_only,
             WCT.Tilt_blind_tilt_and_lift,
@@ -250,21 +262,6 @@ class Cover(BaseCover):
                 functools.partial(self._determine_cover_state, refresh=True),
             )
         )
-
-    @property
-    def _window_covering_type(self) -> WCT:
-        """Return the Window Covering Type value.
-
-        The user override takes priority over the device cluster value.
-        """
-        type_override_cache = self._cover_cluster_handler.data_cache.get(WCT.__name__)
-        if type_override_cache is not None:
-            _LOGGER.debug(
-                "A 'window_covering_type' override is configured: %s",
-                type_override_cache.value,
-            )
-            return type_override_cache.value
-        return self._cover_cluster_handler.window_covering_type
 
     @property
     def supported_features(self) -> CoverEntityFeature:
@@ -577,8 +574,14 @@ class Cover(BaseCover):
 
         Used to recompute capabilities when a user selects a window covering type override.
         """
+        previous_device_class = self._attr_device_class
+        previous_supported_features = self.supported_features
         self.recompute_capabilities()
-        self.maybe_emit_state_changed_event()
+        if (
+            previous_device_class != self._attr_device_class
+            or previous_supported_features != self.supported_features
+        ):
+            self.schedule_update_ha_state()
 
     def async_update_state(self, state):
         """Handle state update from HA operations below."""
