@@ -17,7 +17,7 @@ from zigpy.types.named import EUI64
 
 from zha.application import Platform
 from zha.application.const import UniqueIdMigration
-from zha.const import STATE_CHANGED
+from zha.const import PROPERTY_CHANGED, STATE_CHANGED
 from zha.debounce import Debouncer
 from zha.event import EventBase
 from zha.mixins import LogMixin
@@ -109,6 +109,19 @@ class EntityStateChangedEvent:
     group_id: Optional[int] = None
 
 
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class EntityPropertyChangedEvent:
+    """Event for when an entity property changes."""
+
+    event_type: Final[str] = "entity"
+    event: Final[str] = PROPERTY_CHANGED
+    platform: str
+    unique_id: str
+    device_ieee: Optional[EUI64] = None
+    endpoint_id: Optional[int] = None
+    group_id: Optional[int] = None
+
+
 class BaseEntity(LogMixin, EventBase):
     """Base class for entities."""
 
@@ -136,6 +149,7 @@ class BaseEntity(LogMixin, EventBase):
         self._migrate_unique_ids: list[str] = []
 
         self.__previous_state: Any = None
+        self.__previous_properties: Any = None
         self._tracked_tasks: list[asyncio.Task] = []
         self._tracked_handles: list[asyncio.Handle] = []
         self._on_remove_callbacks: list[Callable[[], None]] = []
@@ -331,6 +345,15 @@ class BaseEntity(LogMixin, EventBase):
                 STATE_CHANGED, EntityStateChangedEvent(**self.identifiers.__dict__)
             )
             self.__previous_state = state
+
+    def maybe_emit_property_changed_event(self) -> None:
+        """Send the properties of this platform entity."""
+        properties = (self.supported_features, self._attr_device_class)
+        if self.__previous_properties != properties:
+            self.emit(
+                PROPERTY_CHANGED, EntityPropertyChangedEvent(**self.identifiers.__dict__)
+            )
+            self.__previous_properties = properties
 
     def log(self, level: int, msg: str, *args: Any, **kwargs: Any) -> None:
         """Log a message."""

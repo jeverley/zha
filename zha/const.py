@@ -3,6 +3,7 @@
 from enum import StrEnum
 from typing import Final
 
+PROPERTY_CHANGED: Final[str] = "property_changed"
 STATE_CHANGED: Final[str] = "state_changed"
 EVENT: Final[str] = "event"
 EVENT_TYPE: Final[str] = "event_type"
