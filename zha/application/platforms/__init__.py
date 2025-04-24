@@ -351,7 +351,8 @@ class BaseEntity(LogMixin, EventBase):
         properties = (self.supported_features, self._attr_device_class)
         if self.__previous_properties != properties:
             self.emit(
-                PROPERTY_CHANGED, EntityPropertyChangedEvent(**self.identifiers.__dict__)
+                PROPERTY_CHANGED,
+                EntityPropertyChangedEvent(**self.identifiers.__dict__),
             )
             self.__previous_properties = properties
 

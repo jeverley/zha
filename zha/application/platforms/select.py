@@ -170,8 +170,11 @@ class DefaultStrobeSelectEntity(NonZCLSelectEntity):
 
 
 @CONFIG_DIAGNOSTIC_MATCH(cluster_handler_names=CLUSTER_HANDLER_COVER)
-class WindowCoveringTypeOverrideSelectEntity(NonZCLSelectEntity):
-    """Representation of a ZHA window covering type override select entity."""
+class WindowCoveringTypeSelectEntity(NonZCLSelectEntity):
+    """Representation of a ZHA window covering type select entity.
+
+    This is used to override the device cluster value, used for generic relay devices.
+    """
 
     _unique_id_suffix = WindowCovering.WindowCoveringType.__name__
     _enum = WindowCovering.WindowCoveringType
@@ -196,6 +199,14 @@ class WindowCoveringTypeOverrideSelectEntity(NonZCLSelectEntity):
         self._cluster_handler.emit(
             CLUSTER_HANDLER_STATE_CHANGED,
             ClusterStateChangedEvent(),
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return entity availability."""
+        return (
+            self._cluster_handler.window_covering_type
+            == WindowCovering.WindowCoveringType.Tilt_blind_tilt_and_lift
         )
 
 

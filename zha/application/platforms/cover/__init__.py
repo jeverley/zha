@@ -13,6 +13,7 @@ from zigpy.zcl.clusters.general import OnOff
 from zigpy.zcl.foundation import Status
 
 from zha.application import Platform
+from zha.application.const import ZHA_EVENT
 from zha.application.platforms import PlatformEntity
 from zha.application.platforms.cover.const import (
     ATTR_CURRENT_POSITION,
@@ -45,6 +46,7 @@ from zha.zigbee.cluster_handlers.const import (
     CLUSTER_HANDLER_STATE_CHANGED,
 )
 from zha.zigbee.cluster_handlers.general import LevelChangeEvent
+from zha.zigbee.device import DeviceStatus, ZHAEvent
 
 if TYPE_CHECKING:
     from zha.zigbee.cluster_handlers import ClusterHandler
@@ -169,6 +171,15 @@ class Cover(BaseCover):
         """
         super().recompute_capabilities()
 
+        # Return early if the device hasn't completed initialization
+        if (
+            self._cover_cluster_handler._endpoint.device.status
+            != DeviceStatus.INITIALIZED
+        ):
+            self._attr_supported_features = CoverEntityFeature(0)
+            self._attr_device_class = None
+            return
+
         # Get the window covering type
         window_covering_type_override = self._cover_cluster_handler.data_cache.get(
             WCT.__name__
@@ -213,6 +224,7 @@ class Cover(BaseCover):
             )
 
         self._attr_supported_features = supported_features
+        self.maybe_emit_property_changed_event()
 
     def on_add(self) -> None:
         """Run when entity is added."""
@@ -226,6 +238,12 @@ class Cover(BaseCover):
         self._on_remove_callbacks.append(
             self._cover_cluster_handler.on_event(
                 CLUSTER_HANDLER_STATE_CHANGED,
+                self.handle_cluster_handler_state_changed,
+            )
+        )
+        self._on_remove_callbacks.append(
+            self._cover_cluster_handler._endpoint.device.on_event(
+                ZHA_EVENT,
                 self.handle_cluster_handler_state_changed,
             )
         )
@@ -565,23 +583,30 @@ class Cover(BaseCover):
         elif event.attribute_id == WCAttrs.current_position_tilt_percentage.id:
             self._tilt_position_history.append(self.current_cover_tilt_position)
             self._determine_cover_state(is_tilt_update=True)
+        elif event.attribute_id == WCAttrs.window_covering_type.id:
+            self.recompute_capabilities()
+            self._determine_cover_state(refresh=True)
 
     def handle_cluster_handler_state_changed(
         self,
         event: ClusterStateChangedEvent,  # pylint: disable=unused-argument
     ) -> None:
-        """Handle entity state changes for the cluster.
+        """Handle state changed on cluster.
 
-        Used to recompute capabilities when a user selects a window covering type override.
+        Used to recompute capabilities when the user changes the 'window covering type' entity.
         """
-        previous_device_class = self._attr_device_class
-        previous_supported_features = self.supported_features
         self.recompute_capabilities()
-        if (
-            previous_device_class != self._attr_device_class
-            or previous_supported_features != self.supported_features
-        ):
-            self.schedule_update_ha_state()
+        self._determine_cover_state(refresh=True)
+
+    def handle_zha_event(self, event: ZHAEvent) -> None:
+        """Handle zha event.
+
+        Used to recompute capabilities after the device is initialized.
+        """
+        if event.data != {"device_event_type": "device_initialized"}:
+            return
+        self.recompute_capabilities()
+        self._determine_cover_state(refresh=True)
 
     def async_update_state(self, state):
         """Handle state update from HA operations below."""
