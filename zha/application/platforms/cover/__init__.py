@@ -167,13 +167,15 @@ class Cover(BaseCover):
     def recompute_capabilities(self) -> None:
         """Recompute capabilities, device class and feature flags from on the window covering type.
 
-        The local window covering type override takes priority over the device cluster value.
+        For the Tilt_blind_tilt_and_lift device type we return early during ZHA device initialization
+        to allow the window_covering_type config entity to load.
         """
         super().recompute_capabilities()
 
-        # Return early if the device hasn't completed initialization
         if (
-            self._cover_cluster_handler._endpoint.device.status
+            self._cover_cluster_handler.window_covering_type
+            == WCT.Tilt_blind_tilt_and_lift
+            and self._cover_cluster_handler._endpoint.device.status
             != DeviceStatus.INITIALIZED
         ):
             self._attr_supported_features = CoverEntityFeature(0)
@@ -244,7 +246,7 @@ class Cover(BaseCover):
         self._on_remove_callbacks.append(
             self._cover_cluster_handler._endpoint.device.on_event(
                 ZHA_EVENT,
-                self.handle_cluster_handler_state_changed,
+                self.handle_zha_event,
             )
         )
         self._on_remove_callbacks.extend(
