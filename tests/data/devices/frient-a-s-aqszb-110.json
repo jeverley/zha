@@ -1,7 +1,7 @@
 {
   "version": 1,
   "ieee": "00:15:bc:00:36:00:1f:ee",
-  "nwk": "0xC8DC",
+  "nwk": "0xCA04",
   "manufacturer": "frient A/S",
   "model": "AQSZB-110",
   "friendly_manufacturer": "frient A/S",
@@ -12,9 +12,9 @@
   "quirk_id": null,
   "manufacturer_code": 4117,
   "power_source": "Battery or Unknown",
-  "lqi": null,
-  "rssi": null,
-  "last_seen": "2025-04-24T17:34:09.376141+00:00",
+  "lqi": 255,
+  "rssi": -55,
+  "last_seen": "2025-04-28T20:52:13.626456+00:00",
   "available": true,
   "device_type": "EndDevice",
   "active_coordinator": false,
@@ -160,7 +160,7 @@
               "name": "on_off",
               "zcl_type": "bool_",
               "value": null,
-              "unsupported": true
+              "unsupported": false
             },
             {
               "id": "0x4001",
@@ -664,14 +664,14 @@
               "id": "0x0021",
               "name": "battery_percentage_remaining",
               "zcl_type": "uint8",
-              "value": null,
-              "unsupported": true
+              "value": 150,
+              "unsupported": false
             },
             {
               "id": "0x0033",
               "name": "battery_quantity",
               "zcl_type": "uint8",
-              "value": null,
+              "value": 2,
               "unsupported": false
             },
             {
@@ -685,7 +685,7 @@
               "id": "0x0031",
               "name": "battery_size",
               "zcl_type": "enum8",
-              "value": null,
+              "value": 3,
               "unsupported": false
             },
             {
@@ -720,7 +720,7 @@
               "id": "0x0020",
               "name": "battery_voltage",
               "zcl_type": "uint8",
-              "value": 30,
+              "value": 29,
               "unsupported": false
             },
             {
@@ -899,7 +899,7 @@
               "id": "0x0000",
               "name": "measured_value",
               "zcl_type": "int16",
-              "value": 2140,
+              "value": 2060,
               "unsupported": false
             },
             {
@@ -947,7 +947,7 @@
               "id": "0x0000",
               "name": "measured_value",
               "zcl_type": "uint16",
-              "value": 2180,
+              "value": 4180,
               "unsupported": false
             },
             {
@@ -1326,7 +1326,7 @@
         "state": {
           "class_name": "LQISensor",
           "available": true,
-          "state": null
+          "state": 255
         }
       },
       {
@@ -1381,7 +1381,7 @@
         "state": {
           "class_name": "RSSISensor",
           "available": true,
-          "state": null
+          "state": -55
         }
       },
       {
@@ -1436,8 +1436,10 @@
         "state": {
           "class_name": "Battery",
           "available": true,
-          "state": null,
-          "battery_voltage": 3.0
+          "state": 75.0,
+          "battery_size": "AA",
+          "battery_quantity": 2,
+          "battery_voltage": 2.9
         }
       },
       {
@@ -1492,7 +1494,7 @@
         "state": {
           "class_name": "Temperature",
           "available": true,
-          "state": 21.4
+          "state": 20.6
         }
       },
       {
@@ -1547,7 +1549,7 @@
         "state": {
           "class_name": "Humidity",
           "available": true,
-          "state": 21.8
+          "state": 41.8
         }
       }
     ],
