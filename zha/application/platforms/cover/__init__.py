@@ -13,6 +13,7 @@ from zigpy.zcl.clusters.general import OnOff
 from zigpy.zcl.foundation import Status
 
 from zha.application import Platform
+from zha.application.const import ZHA_EVENT
 from zha.application.platforms import PlatformEntity
 from zha.application.platforms.cover.const import (
     ATTR_CURRENT_POSITION,
@@ -30,7 +31,10 @@ from zha.application.platforms.cover.const import (
 )
 from zha.application.registries import PLATFORM_ENTITIES
 from zha.exceptions import ZHAException
-from zha.zigbee.cluster_handlers import ClusterAttributeUpdatedEvent
+from zha.zigbee.cluster_handlers import (
+    ClusterAttributeUpdatedEvent,
+    ClusterStateChangedEvent,
+)
 from zha.zigbee.cluster_handlers.closures import WindowCoveringClusterHandler
 from zha.zigbee.cluster_handlers.const import (
     CLUSTER_HANDLER_ATTRIBUTE_UPDATED,
@@ -39,8 +43,10 @@ from zha.zigbee.cluster_handlers.const import (
     CLUSTER_HANDLER_LEVEL_CHANGED,
     CLUSTER_HANDLER_ON_OFF,
     CLUSTER_HANDLER_SHADE,
+    CLUSTER_HANDLER_STATE_CHANGED,
 )
 from zha.zigbee.cluster_handlers.general import LevelChangeEvent
+from zha.zigbee.device import DeviceStatus, ZHAEvent
 
 if TYPE_CHECKING:
     from zha.zigbee.cluster_handlers import ClusterHandler
@@ -136,23 +142,13 @@ class Cover(BaseCover):
         super().__init__(cluster_handlers, endpoint, device, **kwargs)
         cluster_handler = self.cluster_handlers.get(CLUSTER_HANDLER_COVER)
         assert cluster_handler
-
         self._cover_cluster_handler: WindowCoveringClusterHandler = cast(
             WindowCoveringClusterHandler, cluster_handler
         )
-        if self._cover_cluster_handler.window_covering_type is not None:
-            self._attr_device_class: CoverDeviceClass | None = (
-                ZCL_TO_COVER_DEVICE_CLASS.get(
-                    self._cover_cluster_handler.window_covering_type
-                )
-            )
-        self._attr_supported_features: CoverEntityFeature = CoverEntityFeature(0)
         self.recompute_capabilities()
 
         self._target_lift_position: int | None = None
         self._target_tilt_position: int | None = None
-        self._lift_state: CoverState | None = None
-        self._tilt_state: CoverState | None = None
         self._lift_position_history: deque[int | None] = deque(
             [self.current_cover_position], maxlen=2
         )
@@ -163,16 +159,49 @@ class Cover(BaseCover):
         self._lift_transition_timer: asyncio.TimerHandle | None = None
         self._tilt_transition_timer: asyncio.TimerHandle | None = None
 
+        self._lift_state: CoverState | None = None
+        self._tilt_state: CoverState | None = None
         self._state: CoverState | None = None
         self._determine_cover_state(refresh=True)
 
     def recompute_capabilities(self) -> None:
-        """Recompute capabilities and feature flags based on the window covering type."""
+        """Recompute capabilities, device class and feature flags from on the window covering type.
+
+        For the Tilt_blind_tilt_and_lift device type we return early during ZHA device initialization
+        to allow the window_covering_type config entity to load.
+        """
         super().recompute_capabilities()
-        supported_features = CoverEntityFeature(0)
+
+        if (
+            self._cover_cluster_handler.window_covering_type
+            == WCT.Tilt_blind_tilt_and_lift
+            and self._cover_cluster_handler._endpoint.device.status
+            != DeviceStatus.INITIALIZED
+        ):
+            self._attr_supported_features = CoverEntityFeature(0)
+            self._attr_device_class = None
+            return
+
+        # Get the window covering type
+        window_covering_type_override = self._cover_cluster_handler.data_cache.get(
+            WCT.__name__
+        )
+        window_covering_type = (
+            WCT(window_covering_type_override.value)
+            if window_covering_type_override is not None
+            else self._cover_cluster_handler.window_covering_type
+        )
+
+        # Determine the cover device class
+        self._attr_device_class: CoverDeviceClass | None = (
+            (ZCL_TO_COVER_DEVICE_CLASS.get(window_covering_type))
+            if window_covering_type is not None
+            else None
+        )
 
         # Enable lift features if the window covering type is not tilt only
-        if self._cover_cluster_handler.window_covering_type not in (
+        supported_features = CoverEntityFeature(0)
+        if window_covering_type not in (
             WCT.Shutter,
             WCT.Tilt_blind_tilt_only,
         ):
@@ -184,7 +213,7 @@ class Cover(BaseCover):
             )
 
         # Enable tilt features if the window covering type supports tilt
-        if self._cover_cluster_handler.window_covering_type in (
+        if window_covering_type in (
             WCT.Shutter,
             WCT.Tilt_blind_tilt_only,
             WCT.Tilt_blind_tilt_and_lift,
@@ -197,6 +226,7 @@ class Cover(BaseCover):
             )
 
         self._attr_supported_features = supported_features
+        self.maybe_emit_property_changed_event()
 
     def on_add(self) -> None:
         """Run when entity is added."""
@@ -205,6 +235,18 @@ class Cover(BaseCover):
             self._cover_cluster_handler.on_event(
                 CLUSTER_HANDLER_ATTRIBUTE_UPDATED,
                 self.handle_cluster_handler_attribute_updated,
+            )
+        )
+        self._on_remove_callbacks.append(
+            self._cover_cluster_handler.on_event(
+                CLUSTER_HANDLER_STATE_CHANGED,
+                self.handle_cluster_handler_state_changed,
+            )
+        )
+        self._on_remove_callbacks.append(
+            self._cover_cluster_handler._endpoint.device.on_event(
+                ZHA_EVENT,
+                self.handle_zha_event,
             )
         )
         self._on_remove_callbacks.extend(
@@ -420,9 +462,8 @@ class Cover(BaseCover):
             self.maybe_emit_state_changed_event()
             return
 
-        # An open or moving tilt state overrides a static lift state
+        # A moving tilt state overrides a static lift state
         if self._tilt_state in (
-            CoverState.OPEN,
             CoverState.OPENING,
             CoverState.CLOSING,
         ) and self._lift_state in (CoverState.CLOSED, CoverState.OPEN):
@@ -543,6 +584,30 @@ class Cover(BaseCover):
         elif event.attribute_id == WCAttrs.current_position_tilt_percentage.id:
             self._tilt_position_history.append(self.current_cover_tilt_position)
             self._determine_cover_state(is_tilt_update=True)
+        elif event.attribute_id == WCAttrs.window_covering_type.id:
+            self.recompute_capabilities()
+            self._determine_cover_state(refresh=True)
+
+    def handle_cluster_handler_state_changed(
+        self,
+        event: ClusterStateChangedEvent,  # pylint: disable=unused-argument
+    ) -> None:
+        """Handle state changed on cluster.
+
+        Used to recompute capabilities when the user changes the 'window covering type' entity.
+        """
+        self.recompute_capabilities()
+        self._determine_cover_state(refresh=True)
+
+    def handle_zha_event(self, event: ZHAEvent) -> None:
+        """Handle zha event.
+
+        Used to recompute capabilities after the device is initialized.
+        """
+        if event.data != {"device_event_type": "device_initialized"}:
+            return
+        self.recompute_capabilities()
+        self._determine_cover_state(refresh=True)
 
     def async_update_state(self, state):
         """Handle state update from HA operations below."""

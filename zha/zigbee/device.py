@@ -890,6 +890,11 @@ class Device(LogMixin, EventBase):
         self.debug("power source: %s", self.power_source)
         self.status = DeviceStatus.INITIALIZED
         self.debug("completed initialization")
+        self.emit_zha_event(
+            {
+                "device_event_type": "device_initialized",
+            },
+        )
 
     async def on_remove(self) -> None:
         """Cancel tasks this device owns."""

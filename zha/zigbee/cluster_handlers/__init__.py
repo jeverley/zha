@@ -37,6 +37,7 @@ from zha.zigbee.cluster_handlers.const import (
     ATTRIBUTE_VALUE,
     CLUSTER_HANDLER_ATTRIBUTE_UPDATED,
     CLUSTER_HANDLER_EVENT,
+    CLUSTER_HANDLER_STATE_CHANGED,
     CLUSTER_HANDLER_ZDO,
     CLUSTER_ID,
     CLUSTER_READS_PER_REQ,
@@ -158,6 +159,14 @@ class ClusterConfigureReportingEvent:
     cluster_handler_unique_id: str
     event_type: Final[str] = ZHA_CLUSTER_HANDLER_MSG
     event: Final[str] = ZHA_CLUSTER_HANDLER_MSG_CFG_RPT
+
+
+@dataclass(kw_only=True, frozen=True)
+class ClusterStateChangedEvent:
+    """Event to signal that a cluster state has changed."""
+
+    event_type: Final[str] = CLUSTER_HANDLER_EVENT
+    event: Final[str] = CLUSTER_HANDLER_STATE_CHANGED
 
 
 @dataclass(kw_only=True, frozen=True)

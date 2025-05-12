@@ -21,14 +21,12 @@ from zha.application.platforms.alarm_control_panel.const import (
     CodeFormat,
 )
 from zha.application.registries import PLATFORM_ENTITIES
+from zha.zigbee.cluster_handlers import ClusterStateChangedEvent
 from zha.zigbee.cluster_handlers.const import (
     CLUSTER_HANDLER_IAS_ACE,
     CLUSTER_HANDLER_STATE_CHANGED,
 )
-from zha.zigbee.cluster_handlers.security import (
-    ClusterHandlerStateChangedEvent,
-    IasAceClusterHandler,
-)
+from zha.zigbee.cluster_handlers.security import IasAceClusterHandler
 
 if TYPE_CHECKING:
     from zha.zigbee.cluster_handlers import ClusterHandler
@@ -126,7 +124,7 @@ class AlarmControlPanel(PlatformEntity):
 
     def handle_cluster_handler_state_changed(
         self,
-        event: ClusterHandlerStateChangedEvent,  # pylint: disable=unused-argument
+        event: ClusterStateChangedEvent,  # pylint: disable=unused-argument
     ) -> None:
         """Handle state changed on cluster."""
         self.maybe_emit_state_changed_event()

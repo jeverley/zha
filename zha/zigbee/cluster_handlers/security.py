@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-import dataclasses
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any
 
 import zigpy.zcl
 from zigpy.zcl.clusters.security import (
@@ -18,7 +17,12 @@ from zigpy.zcl.clusters.security import (
 )
 
 from zha.exceptions import ZHAException
-from zha.zigbee.cluster_handlers import ClusterHandler, ClusterHandlerStatus, registries
+from zha.zigbee.cluster_handlers import (
+    ClusterHandler,
+    ClusterHandlerStatus,
+    ClusterStateChangedEvent,
+    registries,
+)
 from zha.zigbee.cluster_handlers.const import CLUSTER_HANDLER_STATE_CHANGED
 
 if TYPE_CHECKING:
@@ -26,14 +30,6 @@ if TYPE_CHECKING:
 
 SIGNAL_ARMED_STATE_CHANGED = "zha_armed_state_changed"
 SIGNAL_ALARM_TRIGGERED = "zha_armed_triggered"
-
-
-@dataclasses.dataclass(frozen=True, kw_only=True)
-class ClusterHandlerStateChangedEvent:
-    """Event to signal that a cluster attribute has been updated."""
-
-    event_type: Final[str] = "cluster_handler_event"
-    event: Final[str] = "cluster_handler_state_changed"
 
 
 @registries.CLUSTER_HANDLER_REGISTRY.register(AceCluster.cluster_id)
@@ -229,7 +225,7 @@ class IasAceClusterHandler(ClusterHandler):
         self._endpoint.device.gateway.async_create_task(response)
         self.emit(
             CLUSTER_HANDLER_STATE_CHANGED,
-            ClusterHandlerStateChangedEvent(),
+            ClusterStateChangedEvent(),
         )
 
     def _get_bypassed_zone_list(self):

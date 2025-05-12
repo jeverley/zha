@@ -1,7 +1,7 @@
 {
   "version": 1,
   "ieee": "00:15:bc:00:44:01:11:f9",
-  "nwk": "0x6C9D",
+  "nwk": "0x336F",
   "manufacturer": "frient A/S",
   "model": "WISZB-131",
   "friendly_manufacturer": "frient A/S",
@@ -12,9 +12,9 @@
   "quirk_id": null,
   "manufacturer_code": 4117,
   "power_source": "Battery or Unknown",
-  "lqi": null,
-  "rssi": null,
-  "last_seen": "2025-04-24T17:34:07.996611+00:00",
+  "lqi": 255,
+  "rssi": -53,
+  "last_seen": "2025-04-28T20:49:34.915203+00:00",
   "available": true,
   "device_type": "EndDevice",
   "active_coordinator": false,
@@ -98,6 +98,61 @@
               "id": "0x0003",
               "name": "scene_valid",
               "zcl_type": "bool_",
+              "value": null,
+              "unsupported": false
+            }
+          ]
+        },
+        {
+          "cluster_id": "0x0006",
+          "endpoint_attribute": "on_off",
+          "attributes": [
+            {
+              "id": "0xfffd",
+              "name": "cluster_revision",
+              "zcl_type": "uint16",
+              "value": null,
+              "unsupported": false
+            },
+            {
+              "id": "0x4000",
+              "name": "global_scene_control",
+              "zcl_type": "bool_",
+              "value": null,
+              "unsupported": false
+            },
+            {
+              "id": "0x4002",
+              "name": "off_wait_time",
+              "zcl_type": "uint16",
+              "value": null,
+              "unsupported": false
+            },
+            {
+              "id": "0x0000",
+              "name": "on_off",
+              "zcl_type": "bool_",
+              "value": null,
+              "unsupported": false
+            },
+            {
+              "id": "0x4001",
+              "name": "on_time",
+              "zcl_type": "uint16",
+              "value": null,
+              "unsupported": false
+            },
+            {
+              "id": "0xfffe",
+              "name": "reporting_status",
+              "zcl_type": "enum8",
+              "value": null,
+              "unsupported": false
+            },
+            {
+              "id": "0x4003",
+              "name": "start_up_on_off",
+              "zcl_type": "enum8",
               "value": null,
               "unsupported": false
             }
@@ -582,7 +637,7 @@
               "id": "0x0021",
               "name": "battery_percentage_remaining",
               "zcl_type": "uint8",
-              "value": 200,
+              "value": 180,
               "unsupported": false
             },
             {
@@ -638,7 +693,7 @@
               "id": "0x0020",
               "name": "battery_voltage",
               "zcl_type": "uint8",
-              "value": 30,
+              "value": 29,
               "unsupported": false
             },
             {
@@ -727,6 +782,89 @@
           ]
         },
         {
+          "cluster_id": "0x000f",
+          "endpoint_attribute": "binary_input",
+          "attributes": [
+            {
+              "id": "0x0004",
+              "name": "active_text",
+              "zcl_type": "string",
+              "value": null,
+              "unsupported": false
+            },
+            {
+              "id": "0x0100",
+              "name": "application_type",
+              "zcl_type": "uint32",
+              "value": null,
+              "unsupported": false
+            },
+            {
+              "id": "0xfffd",
+              "name": "cluster_revision",
+              "zcl_type": "uint16",
+              "value": null,
+              "unsupported": false
+            },
+            {
+              "id": "0x001c",
+              "name": "description",
+              "zcl_type": "string",
+              "value": null,
+              "unsupported": false
+            },
+            {
+              "id": "0x002e",
+              "name": "inactive_text",
+              "zcl_type": "string",
+              "value": null,
+              "unsupported": false
+            },
+            {
+              "id": "0x0051",
+              "name": "out_of_service",
+              "zcl_type": "bool_",
+              "value": null,
+              "unsupported": false
+            },
+            {
+              "id": "0x0054",
+              "name": "polarity",
+              "zcl_type": "enum8",
+              "value": null,
+              "unsupported": false
+            },
+            {
+              "id": "0x0055",
+              "name": "present_value",
+              "zcl_type": "bool_",
+              "value": 1,
+              "unsupported": false
+            },
+            {
+              "id": "0x0067",
+              "name": "reliability",
+              "zcl_type": "enum8",
+              "value": 0,
+              "unsupported": false
+            },
+            {
+              "id": "0xfffe",
+              "name": "reporting_status",
+              "zcl_type": "enum8",
+              "value": null,
+              "unsupported": false
+            },
+            {
+              "id": "0x006f",
+              "name": "status_flags",
+              "zcl_type": "map8",
+              "value": 0,
+              "unsupported": false
+            }
+          ]
+        },
+        {
           "cluster_id": "0x0020",
           "endpoint_attribute": "poll_control",
           "attributes": [
@@ -803,7 +941,7 @@
               "id": "0x0010",
               "name": "cie_addr",
               "zcl_type": "EUI64",
-              "value": "00:12:4b:00:1c:a1:b8:46",
+              "value": "bc:02:6e:ff:fe:24:db:90",
               "unsupported": false
             },
             {
@@ -1522,7 +1660,7 @@
               "id": "0x0000",
               "name": "measured_value",
               "zcl_type": "int16",
-              "value": 2025,
+              "value": 2012,
               "unsupported": false
             },
             {
@@ -1629,6 +1767,57 @@
         },
         "state": {
           "class_name": "IASZone",
+          "available": true,
+          "state": true
+        }
+      },
+      {
+        "info_object": {
+          "fallback_name": null,
+          "unique_id": "00:15:bc:00:44:01:11:f9-35-15",
+          "migrate_unique_ids": [],
+          "platform": "binary_sensor",
+          "class_name": "BinaryInput",
+          "translation_key": "binary_input",
+          "device_class": null,
+          "state_class": null,
+          "entity_category": null,
+          "entity_registry_enabled_default": true,
+          "enabled": true,
+          "primary": false,
+          "cluster_handlers": [
+            {
+              "class_name": "BinaryInputClusterHandler",
+              "generic_id": "cluster_handler_0x000f",
+              "endpoint_id": 35,
+              "cluster": {
+                "id": 15,
+                "name": "Binary Input (Basic)",
+                "type": "server"
+              },
+              "id": "35:0x000f",
+              "unique_id": "00:15:bc:00:44:01:11:f9:35:0x000f",
+              "status": "INITIALIZED",
+              "value_attribute": "present_value"
+            }
+          ],
+          "device_ieee": [
+            249,
+            17,
+            1,
+            68,
+            0,
+            188,
+            21,
+            0
+          ],
+          "endpoint_id": 35,
+          "available": true,
+          "group_id": null,
+          "attribute_name": "present_value"
+        },
+        "state": {
+          "class_name": "BinaryInput",
           "available": true,
           "state": true
         }
@@ -1743,7 +1932,7 @@
         "state": {
           "class_name": "LQISensor",
           "available": true,
-          "state": null
+          "state": 255
         }
       },
       {
@@ -1798,7 +1987,7 @@
         "state": {
           "class_name": "RSSISensor",
           "available": true,
-          "state": null
+          "state": -53
         }
       },
       {
@@ -1853,10 +2042,10 @@
         "state": {
           "class_name": "Battery",
           "available": true,
-          "state": 100.0,
+          "state": 90.0,
           "battery_size": "AAA",
           "battery_quantity": 2,
-          "battery_voltage": 3.0
+          "battery_voltage": 2.9
         }
       },
       {
@@ -1911,7 +2100,7 @@
         "state": {
           "class_name": "Temperature",
           "available": true,
-          "state": 20.25
+          "state": 20.12
         }
       }
     ],

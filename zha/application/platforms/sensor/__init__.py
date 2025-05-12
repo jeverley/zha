@@ -21,6 +21,7 @@ from zigpy.state import Counter, State
 from zigpy.zcl import foundation
 from zigpy.zcl.clusters.closures import WindowCovering
 from zigpy.zcl.clusters.general import Basic
+from zigpy.zcl.clusters.smartenergy import Metering
 
 from zha.application import Platform
 from zha.application.platforms import (
@@ -32,11 +33,15 @@ from zha.application.platforms import (
 )
 from zha.application.platforms.climate.const import HVACAction
 from zha.application.platforms.helpers import validate_device_class
+from zha.application.platforms.number.bacnet import BACNET_UNITS_TO_HA_UNITS
 from zha.application.platforms.sensor.const import (
+    ANALOG_INPUT_APPTYPE_DEV_CLASS,
+    ANALOG_INPUT_APPTYPE_UNITS,
     UNIX_EPOCH_TO_ZCL_EPOCH,
     SensorDeviceClass,
     SensorStateClass,
 )
+from zha.application.platforms.sensor.helpers import resolution_to_decimal_precision
 from zha.application.registries import PLATFORM_ENTITIES
 from zha.decorators import periodic
 from zha.units import (
@@ -309,12 +314,17 @@ class Sensor(PlatformEntity):
         ):
             self.maybe_emit_state_changed_event()
 
-    def _is_non_value(self, value: int | float) -> bool:
+    def _is_non_value(
+        self, value: int | float, *, attr_def: foundation.ZCLAttributeDef | None = None
+    ) -> bool:
         """Ignore non-value numerical values."""
-        if self._attr_def is None:
+        if attr_def is None:
+            attr_def = self._attr_def
+
+        if attr_def is None:
             return False
 
-        data_type = foundation.DataType.from_type_id(self._attr_def.zcl_type)
+        data_type = foundation.DataType.from_type_id(attr_def.zcl_type)
         return value == data_type.non_value
 
     def formatter(
@@ -558,11 +568,61 @@ class EnumSensor(Sensor):
     manufacturers="Digi",
     stop_on_match_group=CLUSTER_HANDLER_ANALOG_INPUT,
 )
-class AnalogInput(Sensor):
+class DigiAnalogInput(Sensor):
     """Sensor that displays analog input values."""
 
     _attribute_name = "present_value"
     _attr_translation_key: str = "analog_input"
+
+
+@CONFIG_DIAGNOSTIC_MATCH(cluster_handler_names=CLUSTER_HANDLER_ANALOG_INPUT)
+class AnalogInputSensor(Sensor):
+    """Sensor that displays analog input values."""
+
+    _attribute_name = "present_value"
+    _unique_id_suffix = "analog_input"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def recompute_capabilities(self) -> None:
+        """Recompute capabilities."""
+        super().recompute_capabilities()
+
+        self._attr_fallback_name = self._cluster_handler.description
+
+        if self._cluster_handler.application_type is not None:
+            # The application type encodes a tiny bit more info but it's mostly
+            # irrelevant, just use the `type` sub-field
+            app_type = self._cluster_handler.application_type.type
+            self._attr_device_class = ANALOG_INPUT_APPTYPE_DEV_CLASS.get(app_type)
+
+            # Application type units take precedence
+            self._attr_native_unit_of_measurement = ANALOG_INPUT_APPTYPE_UNITS.get(
+                app_type
+            )
+        else:
+            self._attr_native_unit_of_measurement = BACNET_UNITS_TO_HA_UNITS.get(
+                self._cluster_handler.engineering_units
+            )
+
+        # Resolution indicates the minimum change in value that can be detected
+        if self._cluster_handler.resolution is not None:
+            self._attr_suggested_display_precision = resolution_to_decimal_precision(
+                self._cluster_handler.resolution
+            )
+
+    def _is_supported(self) -> bool:
+        """Return True if this sensor is supported."""
+        if self._cluster_handler.description is None:
+            return False
+
+        # The units are determined by one of these
+        if (
+            self._cluster_handler.application_type is None
+            and self._cluster_handler.engineering_units is None
+        ):
+            return False
+
+        return super()._is_supported()
 
 
 @MULTI_MATCH(cluster_handler_names=CLUSTER_HANDLER_POWER_CONFIGURATION)
@@ -669,10 +729,7 @@ class BaseElectricalMeasurement(PollableSensor):
         else:
             divisor = self._divisor
 
-        value = float(value * multiplier) / divisor
-        if value < 100 and divisor > 1:
-            return round(value, self._attr_suggested_display_precision)
-        return round(value)
+        return float(value * multiplier) / divisor
 
 
 @MULTI_MATCH(
@@ -690,7 +747,7 @@ class ElectricalMeasurement(BaseElectricalMeasurement):
     cluster_handler_names=CLUSTER_HANDLER_ELECTRICAL_MEASUREMENT,
     stop_on_match_group=CLUSTER_HANDLER_ELECTRICAL_MEASUREMENT,
 )
-class PolledElectricalMeasurement(ElectricalMeasurement):
+class PolledElectricalMeasurement(BaseElectricalMeasurement):
     """Polled active power measurement."""
 
     _use_custom_polling: bool = True
@@ -1002,16 +1059,12 @@ class SmartEnergyMetering(PollableSensor):
         ),
     }
 
-    def __init__(
-        self,
-        cluster_handlers: list[ClusterHandler],
-        endpoint: Endpoint,
-        device: Device,
-        **kwargs: Any,
-    ) -> None:
-        """Init."""
-        super().__init__(cluster_handlers, endpoint, device, **kwargs)
-        self.recompute_capabilities()
+    def _is_supported(self) -> bool:
+        unit = self._cluster_handler.unit_of_measurement
+        if self._is_non_value(unit, attr_def=Metering.AttributeDefs.unit_of_measure):
+            return False
+
+        return super()._is_supported()
 
     def recompute_capabilities(self) -> None:
         """Recompute capabilities and feature flags."""

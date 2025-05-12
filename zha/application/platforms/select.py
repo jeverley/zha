@@ -18,6 +18,7 @@ from zhaquirks.xiaomi.aqara.magnet_ac01 import OppleCluster as MagnetAC01OppleCl
 from zhaquirks.xiaomi.aqara.switch_acn047 import OppleCluster as T2RelayOppleCluster
 from zigpy import types
 from zigpy.quirks.v2 import ZCLEnumMetadata
+from zigpy.zcl.clusters.closures import WindowCovering
 from zigpy.zcl.clusters.general import OnOff
 from zigpy.zcl.clusters.security import IasWd
 
@@ -25,14 +26,19 @@ from zha.application import Platform
 from zha.application.const import Strobe
 from zha.application.platforms import BaseEntityInfo, EntityCategory, PlatformEntity
 from zha.application.registries import PLATFORM_ENTITIES
-from zha.zigbee.cluster_handlers import ClusterAttributeUpdatedEvent
+from zha.zigbee.cluster_handlers import (
+    ClusterAttributeUpdatedEvent,
+    ClusterStateChangedEvent,
+)
 from zha.zigbee.cluster_handlers.const import (
     CLUSTER_HANDLER_ATTRIBUTE_UPDATED,
+    CLUSTER_HANDLER_COVER,
     CLUSTER_HANDLER_HUE_OCCUPANCY,
     CLUSTER_HANDLER_IAS_WD,
     CLUSTER_HANDLER_INOVELLI,
     CLUSTER_HANDLER_OCCUPANCY,
     CLUSTER_HANDLER_ON_OFF,
+    CLUSTER_HANDLER_STATE_CHANGED,
     CLUSTER_HANDLER_THERMOSTAT,
 )
 
@@ -161,6 +167,47 @@ class DefaultStrobeSelectEntity(NonZCLSelectEntity):
     _unique_id_suffix = "Strobe"
     _enum = Strobe
     _attr_translation_key: str = "default_strobe"
+
+
+@CONFIG_DIAGNOSTIC_MATCH(cluster_handler_names=CLUSTER_HANDLER_COVER)
+class WindowCoveringTypeSelectEntity(NonZCLSelectEntity):
+    """Representation of a ZHA window covering type select entity.
+
+    This is used to override the device cluster value, used for generic relay devices.
+    """
+
+    _unique_id_suffix = WindowCovering.WindowCoveringType.__name__
+    _enum = WindowCovering.WindowCoveringType
+    _attr_entity_registry_enabled_default: bool = False
+    _attr_translation_key: str = "device_mode"
+
+    async def async_select_option(self, option: str) -> None:
+        """Change the selected option."""
+        await super().async_select_option(option)
+        self._cluster_handler.emit(
+            CLUSTER_HANDLER_STATE_CHANGED,
+            ClusterStateChangedEvent(),
+        )
+
+    def restore_external_state_attributes(
+        self,
+        *,
+        state: str,
+    ) -> None:
+        """Restore extra state attributes that are stored outside of the ZCL cache."""
+        super().restore_external_state_attributes(state=state)
+        self._cluster_handler.emit(
+            CLUSTER_HANDLER_STATE_CHANGED,
+            ClusterStateChangedEvent(),
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return entity availability."""
+        return (
+            self._cluster_handler.window_covering_type
+            == WindowCovering.WindowCoveringType.Tilt_blind_tilt_and_lift
+        )
 
 
 class ZCLEnumSelectEntity(PlatformEntity):
